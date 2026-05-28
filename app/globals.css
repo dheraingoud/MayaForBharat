@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-sora: var(--font-sora);
+  --font-dm-sans: var(--font-dm-sans);
+  --font-jetbrains-mono: var(--font-jetbrains-mono);
+  
+  /* MAYA Color Palette */
+  --bg-primary: #F5F4F0;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #EFEDE8;
+  --border-warm: #E4E1DA;
+  --text-primary: #1A1917;
+  --text-secondary: #6B6560;
+  --text-muted: #9E9890;
+  --accent-orange: #E8601A;
+  --accent-hover: #C94E12;
+  --accent-soft: #FDF0E8;
+  --dark-bg: #1A1917;
+  --success-green: #2D7A4F;
+  --warning-amber: #B45309;
+  --error-red: #C0392B;
+}
+
+@theme inline {
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-sora);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+@layer base {
+  body {
+    @apply bg-[#F5F4F0] text-[#1A1917];
+  }
+
+  .dark body {
+    @apply bg-[#1A1917] text-[#F5F4F0];
+  }
+}
+
+/* MAYA Custom Animations */
+@keyframes ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes audio-bar {
+  0% { height: 10%; }
+  100% { height: 90%; }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.ring-animation {
+  animation: ripple 2s linear infinite;
+}
+
+.audio-bar {
+  animation: audio-bar 1s ease-in-out infinite alternate;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

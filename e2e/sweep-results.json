@@ -1,0 +1,47 @@
+[
+  {
+    "name": "01-home",
+    "url": "http://localhost:3000/",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "02-sign-in",
+    "url": "http://localhost:3000/sign-in",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/sign-in\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/sign-in\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "03-sign-up",
+    "url": "http://localhost:3000/sign-up",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/sign-up\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/sign-up\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "04-record-redirect",
+    "url": "http://localhost:3000/record",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/record\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/record\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "05-builder-redirect",
+    "url": "http://localhost:3000/builder",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/builder\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/builder\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "06-dashboard-redirect",
+    "url": "http://localhost:3000/dashboard",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/dashboard\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/dashboard\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "07-showcase",
+    "url": "http://localhost:3000/showcase",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/showcase\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/showcase\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "08-updates",
+    "url": "http://localhost:3000/updates",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/updates\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/updates\", waiting until \"networkidle\"\u001b[22m\n"
+  },
+  {
+    "name": "09-approval-redirect",
+    "url": "http://localhost:3000/approval",
+    "error": "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/approval\nCall log:\n\u001b[2m  - navigating to \"http://localhost:3000/approval\", waiting until \"networkidle\"\u001b[22m\n"
+  }
+]
