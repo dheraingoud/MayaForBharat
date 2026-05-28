@@ -30,7 +30,7 @@ export function validateEnv(): EnvCheck[] {
     { name: 'Groq Key 1', present: has('GROQ_KEY_1'), required: false, envKey: 'GROQ_KEY_1' },
     { name: 'Groq Key 2', present: has('GROQ_KEY_2'), required: false, envKey: 'GROQ_KEY_2' },
     // Vercel (optional — mock URL returned when missing)
-    { name: 'Vercel Token', present: has('VERCEL_TOKEN'), required: false, envKey: 'VERCEL_TOKEN' },
+    { name: 'Vercel Token', present: has('DEPLOY_TOKEN'), required: false, envKey: 'DEPLOY_TOKEN' },
     // Convex (optional — no persistence when missing)
     { name: 'Convex URL', present: has('NEXT_PUBLIC_CONVEX_URL'), required: false, envKey: 'NEXT_PUBLIC_CONVEX_URL' },
     { name: 'Convex Deploy Key', present: has('CONVEX_DEPLOY_KEY'), required: false, envKey: 'CONVEX_DEPLOY_KEY' },

@@ -4,7 +4,7 @@
  * Creates a Vercel project via REST API, uploads app code,
  * injects AGENTS.md + MAYA.md, and returns the live preview URL.
  *
- * Falls back gracefully to a mock URL when VERCEL_TOKEN is missing
+ * Falls back gracefully to a mock URL when DEPLOY_TOKEN is missing
  * so hackathon demos stay functional.
  */
 
@@ -167,7 +167,7 @@ export async function deployToVercel({
   directory,
   memoryDir,
 }: DeployOptions): Promise<DeployResult> {
-  const token = process.env.VERCEL_TOKEN
+  const token = process.env.DEPLOY_TOKEN
 
   // Ensure project name is globally unique and safe for Vercel
   const safeName = projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 40)
