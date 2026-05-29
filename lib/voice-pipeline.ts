@@ -306,16 +306,21 @@ export async function buildWithRetry(
 
       // Validate JSON natively first
       let files: any[] = []
+      let isValidJson = false
       try {
         const parsed = JSON.parse(raw)
         if (parsed.files && Array.isArray(parsed.files)) {
           files = parsed.files
+          isValidJson = true
         }
       } catch (parseError) {
-        // ULTIMATE BULLETPROOFING: If JSON.parse fails (e.g. bad control characters, missing commas, truncated string),
-        // we completely bypass the crash and manually extract all valid file blocks using regex!
-        console.warn(`[build] JSON parse failed, falling back to robust regex extraction`)
-        files = robustParseFiles(raw)
+        console.warn(`[build] JSON parse failed on attempt ${attempt + 1}`)
+      }
+
+      if (!isValidJson) {
+        lastError = 'Output must be strictly valid JSON without control characters or truncation.'
+        console.warn(`[build] Attempt ${attempt + 1} invalid JSON. Forcing retry.`)
+        continue // Force the model to rewrite the code properly so the build doesn't fail
       }
 
       if (files.length > 0) {
