@@ -13,9 +13,33 @@ export const listByTrader = query({
   },
 })
 
-export const getById = query({
-  args: { id: v.id("apps") },
-  handler: async (ctx, { id }) => await ctx.db.get(id),
+export const getByAppId = query({
+  args: { appId: v.string() },
+  handler: async (ctx, { appId }) => {
+    return await ctx.db
+      .query("apps")
+      .withIndex("by_app_id", (q) => q.eq("appId", appId))
+      .first()
+  },
+})
+
+export const listAll = query({
+  handler: async (ctx) => {
+    return await ctx.db.query("apps").order("desc").collect()
+  },
+})
+
+export const removeByAppId = mutation({
+  args: { appId: v.string() },
+  handler: async (ctx, { appId }) => {
+    const app = await ctx.db
+      .query("apps")
+      .withIndex("by_app_id", (q) => q.eq("appId", appId))
+      .first()
+    if (app) {
+      await ctx.db.delete(app._id)
+    }
+  },
 })
 
 // ── Mutations ────────────────────────────────────────
@@ -23,21 +47,49 @@ export const getById = query({
 export const create = mutation({
   args: {
     traderId: v.string(),
+    appId: v.optional(v.string()),
     name: v.string(),
-    nameHindi: v.string(),
-    descriptionHindi: v.string(),
-    specJson: v.string(),
-    templateFamily: v.union(
+    nameHindi: v.optional(v.string()),
+    descriptionHindi: v.optional(v.string()),
+    descriptionEn: v.optional(v.string()),
+    specJson: v.optional(v.string()),
+    templateFamily: v.optional(v.union(
       v.literal("kirana"),
       v.literal("services"),
       v.literal("food")
-    ),
+    )),
+    category: v.optional(v.string()),
     vercelUrl: v.optional(v.string()),
+    vercelProjectId: v.optional(v.string()),
+    adminUsername: v.optional(v.string()),
+    adminPin: v.optional(v.string()),
+    shownToOwner: v.optional(v.boolean()),
+    status: v.optional(v.union(
+      v.literal("building"),
+      v.literal("live"),
+      v.literal("evolving"),
+      v.literal("error")
+    )),
   },
   handler: async (ctx, args) => {
+    // Check if app already exists
+    if (args.appId) {
+      const existing = await ctx.db
+        .query("apps")
+        .withIndex("by_app_id", (q) => q.eq("appId", args.appId as string))
+        .first()
+      
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          ...args,
+        })
+        return existing._id
+      }
+    }
+
     return await ctx.db.insert("apps", {
       ...args,
-      status: "building",
+      status: args.status || "building",
       evolutionCount: 0,
       createdAt: Date.now(),
     })
@@ -51,6 +103,7 @@ export const update = mutation({
     vercelUrl: v.optional(v.string()),
     evolutionCount: v.optional(v.number()),
     lastEvolvedAt: v.optional(v.number()),
+    shownToOwner: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const updates: Record<string, any> = {}
@@ -58,6 +111,7 @@ export const update = mutation({
     if (args.vercelUrl) updates.vercelUrl = args.vercelUrl
     if (args.evolutionCount !== undefined) updates.evolutionCount = args.evolutionCount
     if (args.lastEvolvedAt) updates.lastEvolvedAt = args.lastEvolvedAt
+    if (args.shownToOwner !== undefined) updates.shownToOwner = args.shownToOwner
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(args.id, updates)
     }

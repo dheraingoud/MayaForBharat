@@ -7,6 +7,7 @@ import { content } from '@/lib/translations'
 import { useRouter, usePathname } from 'next/navigation'
 import { Sun, Moon } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { useAuth, UserButton } from '@clerk/nextjs'
 
 export function Navigation({ hideCta = false }: { hideCta?: boolean }) {
   const { language, setLanguage } = useLanguage()
@@ -14,6 +15,7 @@ export function Navigation({ hideCta = false }: { hideCta?: boolean }) {
   const router = useRouter()
   const pathname = usePathname()
   const [mounted, setMounted] = useState(false)
+  const { isLoaded, isSignedIn } = useAuth()
 
   const isLander = pathname === '/'
 
@@ -114,8 +116,21 @@ export function Navigation({ hideCta = false }: { hideCta?: boolean }) {
                 )}
               </motion.button>
 
+              {/* Clerk User Avatar */}
+              {isLoaded && isSignedIn && (
+                <div className="flex items-center ml-2">
+                  <UserButton 
+                    appearance={{
+                      elements: {
+                        userButtonAvatarBox: "w-8 h-8 sm:w-9 sm:h-9 shadow-sm hover:shadow-md transition-shadow"
+                      }
+                    }}
+                  />
+                </div>
+              )}
+
               {/* CTA Button */}
-              {isLander && !hideCta && (
+              {isLander && !hideCta && isLoaded && !isSignedIn && (
                 <motion.button
                   onClick={() => router.push('/sign-in')}
                   whileHover={{ scale: 1.05 }}

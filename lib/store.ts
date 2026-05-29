@@ -6,6 +6,11 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { getBuildsDir } from '@/lib/path'
+import { ConvexHttpClient } from "convex/browser"
+import { api } from "@/convex/_generated/api"
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL || "https://example.check.convex.cloud"
+const convex = new ConvexHttpClient(convexUrl)
 
 export interface BuiltApp {
   id: string
@@ -23,43 +28,76 @@ export interface BuiltApp {
   files: Array<{ path: string; content: string }>
 }
 
-const STORE_PATH = getBuildsDir('apps.json')
-
 function getAppDir(id: string): string {
   return getBuildsDir(id)
 }
 
+function mapFromConvex(doc: any): BuiltApp {
+  return {
+    id: doc.appId || doc._id,
+    name: doc.name,
+    nameHindi: doc.nameHindi || doc.name,
+    descriptionEn: doc.descriptionEn || doc.descriptionHindi || '',
+    category: doc.category || doc.templateFamily || 'other',
+    url: doc.vercelUrl || '',
+    projectId: doc.vercelProjectId || '',
+    createdAt: new Date(doc.createdAt).toISOString(),
+    status: doc.status as 'live' | 'building',
+    adminUsername: doc.adminUsername,
+    adminPin: doc.adminPin,
+    shownToOwner: doc.shownToOwner,
+    files: [],
+  }
+}
+
 export async function readStore(): Promise<BuiltApp[]> {
   try {
-    const raw = await fs.readFile(STORE_PATH, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
+    const docs = await convex.query(api.apps.listAll)
+    return docs.map(mapFromConvex)
+  } catch (e) {
+    console.error("Error reading store from Convex:", e)
     return []
   }
 }
 
-export async function writeStore(apps: BuiltApp[]): Promise<void> {
-  await fs.mkdir(path.dirname(STORE_PATH), { recursive: true })
-  await fs.writeFile(STORE_PATH, JSON.stringify(apps, null, 2), 'utf-8')
-}
-
 export async function addApp(app: BuiltApp): Promise<void> {
-  const apps = await readStore()
-  // Remove if exists (update)
-  const existing = apps.filter((a) => a.id !== app.id)
-  existing.unshift(app)
-  await writeStore(existing)
+  try {
+    await convex.mutation(api.apps.create, {
+      traderId: "anonymous", // we don't have auth context here, could be passed later
+      appId: app.id,
+      name: app.name,
+      nameHindi: app.nameHindi,
+      descriptionEn: app.descriptionEn,
+      category: app.category,
+      vercelUrl: app.url,
+      vercelProjectId: app.projectId,
+      adminUsername: app.adminUsername,
+      adminPin: app.adminPin,
+      shownToOwner: app.shownToOwner,
+      status: app.status,
+    })
+  } catch (e) {
+    console.error("Error adding app to Convex:", e)
+  }
 }
 
 export async function getApp(id: string): Promise<BuiltApp | null> {
-  const apps = await readStore()
-  return apps.find((a) => a.id === id) || null
+  try {
+    const doc = await convex.query(api.apps.getByAppId, { appId: id })
+    if (!doc) return null
+    return mapFromConvex(doc)
+  } catch (e) {
+    console.error("Error getting app from Convex:", e)
+    return null
+  }
 }
 
 export async function removeApp(id: string): Promise<void> {
-  const apps = await readStore()
-  await writeStore(apps.filter((a) => a.id !== id))
+  try {
+    await convex.mutation(api.apps.removeByAppId, { appId: id })
+  } catch (e) {
+    console.error("Error removing app from Convex:", e)
+  }
 }
 
 export async function readAppFiles(

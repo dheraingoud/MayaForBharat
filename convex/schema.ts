@@ -11,28 +11,34 @@ export default defineSchema({
 
   apps: defineTable({
     traderId: v.string(),
+    appId: v.optional(v.string()), // to map to external crypto.randomUUID()
     name: v.string(),
-    nameHindi: v.string(),
-    descriptionHindi: v.string(),
-    specJson: v.string(),
+    nameHindi: v.optional(v.string()),
+    descriptionHindi: v.optional(v.string()),
+    descriptionEn: v.optional(v.string()),
+    specJson: v.optional(v.string()),
     fileTree: v.optional(v.string()),
     vercelProjectId: v.optional(v.string()),
     vercelUrl: v.optional(v.string()),
+    category: v.optional(v.string()),
     status: v.union(
       v.literal("building"),
       v.literal("live"),
       v.literal("evolving"),
       v.literal("error")
     ),
-    templateFamily: v.union(
+    templateFamily: v.optional(v.union(
       v.literal("kirana"),
       v.literal("services"),
       v.literal("food")
-    ),
-    evolutionCount: v.number(),
+    )),
+    adminUsername: v.optional(v.string()),
+    adminPin: v.optional(v.string()),
+    shownToOwner: v.optional(v.boolean()),
+    evolutionCount: v.optional(v.number()),
     lastEvolvedAt: v.optional(v.number()),
     createdAt: v.number(),
-  }).index("by_trader", ["traderId"]),
+  }).index("by_trader", ["traderId"]).index("by_app_id", ["appId"]),
 
   improvements: defineTable({
     appId: v.id("apps"),
