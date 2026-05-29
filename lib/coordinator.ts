@@ -46,6 +46,7 @@ import {
   cleanupOrphanedWorktrees,
 } from './worktree'
 import { getSkillsForContext } from './skills'
+import { getBuildsDir } from '@/lib/path'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
 // and loaded at the start of the next evolution cycle.
 
 const PENDING_QUEUE_FILE = (appId: string) =>
-  path.join(process.cwd(), '.maya-builds', appId, 'pending-proposals.json')
+  getBuildsDir(appId, 'pending-proposals.json')
 
 async function loadPendingProposals(appId: string): Promise<Proposal[]> {
   try {
@@ -510,7 +511,7 @@ export async function runEvolutionCycle(
 
       // Save to pending improvements queue for user approval instead of auto-merging
       try {
-        const pendingPath = path.join(process.cwd(), '.maya-builds', app.id, '.maya', 'pending-improvements.json')
+        const pendingPath = getBuildsDir(app.id, '.maya', 'pending-improvements.json')
         await fsp.mkdir(path.dirname(pendingPath), { recursive: true })
         let pending = []
         try {

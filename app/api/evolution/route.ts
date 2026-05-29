@@ -20,13 +20,11 @@ export async function POST(request: Request) {
       )
     }
 
-    const appExists = await getApp(appId)
-    if (!appExists) {
-      console.warn(`[api/evolution] Aborting evolution: App ${appId} has been deleted.`)
-      return NextResponse.json({ error: 'App not found or deleted' }, { status: 404 })
-    }
+    const app = await getApp(appId)
+    if (!app) return NextResponse.json({ error: 'App not found' }, { status: 404 })
 
-    const appDir = path.join(process.cwd(), '.maya-builds', appId)
+    const { getBuildsDir } = await import('@/lib/path')
+    const appDir = getBuildsDir(appId)
 
     // Read memory files
     const mayaMd = await readMayaMd(appDir).catch(() => '')

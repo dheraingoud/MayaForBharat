@@ -36,7 +36,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'App not found' }, { status: 404 })
     }
 
-    const appDir = path.join(process.cwd(), '.maya-builds', appId)
+    const { getBuildsDir } = await import('@/lib/path')
+    const appDir = getBuildsDir(appId)
 
     // Read episodes (evolution cycle results)
     const episodes = await readEpisodes(appDir).catch(() => [])

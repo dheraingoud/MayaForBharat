@@ -33,7 +33,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'App not found' }, { status: 404 })
     }
 
-    const buildDir = path.join(process.cwd(), '.maya-builds', appId)
+    const { getBuildsDir } = await import('@/lib/path')
+    const buildDir = getBuildsDir(appId)
 
     // Read current files from disk
     let currentFiles: { path: string; content: string }[] = []

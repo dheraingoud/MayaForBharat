@@ -3,6 +3,7 @@ import { buildWithRetry, type AppSpec, sanitizeFiles, reviewAndFixCode } from '@
 import { deployToVercel } from '@/lib/deploy'
 import { addApp } from '@/lib/store'
 import { deriveAppDesign, generateGlobalsCss, FEATURE_TIERS } from '@/lib/design'
+import { getBuildsDir } from '@/lib/path'
 import path from 'path'
 import { promises as fs } from 'fs'
 
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
         const filteredFiles = finalFiles.filter(f => f.path !== 'app/globals.css' && f.path !== 'styles/globals.css')
         filteredFiles.push({ path: 'app/globals.css', content: globalsCssContent })
 
-        const buildDir = path.join(process.cwd(), '.maya-builds', appId)
+        const buildDir = getBuildsDir(appId)
         await fs.mkdir(buildDir, { recursive: true })
 
         sendEvent('progress', { message: 'Writing files to disk...' })

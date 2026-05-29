@@ -5,6 +5,7 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
+import { getBuildsDir } from '@/lib/path'
 
 export interface BuiltApp {
   id: string
@@ -22,10 +23,10 @@ export interface BuiltApp {
   files: Array<{ path: string; content: string }>
 }
 
-const STORE_PATH = path.join(process.cwd(), '.maya-builds', 'apps.json')
+const STORE_PATH = getBuildsDir('apps.json')
 
 function getAppDir(id: string): string {
-  return path.join(process.cwd(), '.maya-builds', id)
+  return getBuildsDir(id)
 }
 
 export async function readStore(): Promise<BuiltApp[]> {

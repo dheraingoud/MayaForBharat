@@ -89,7 +89,9 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
 
 // ─── Cache Management ─────────────────────────────────────────────────────────
 
-const SKILLS_CACHE_DIR = path.join(process.cwd(), '.maya-builds', '.skills')
+import { getBuildsDir } from '@/lib/path'
+
+const SKILLS_CACHE_DIR = getBuildsDir('.skills')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 interface CachedSkill {

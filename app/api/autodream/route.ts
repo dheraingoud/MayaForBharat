@@ -17,7 +17,8 @@ export async function POST(request: Request) {
       )
     }
 
-    const appDir = path.join(process.cwd(), '.maya-builds', appId)
+    const { getBuildsDir } = await import('@/lib/path')
+    const appDir = getBuildsDir(appId)
     const result = await autoDream(appDir)
 
     return NextResponse.json({

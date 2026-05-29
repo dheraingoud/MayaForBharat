@@ -21,7 +21,8 @@ export async function DELETE(
     }
 
     // 2. Delete local build directory
-    const appDir = path.join(process.cwd(), '.maya-builds', id)
+    const { getBuildsDir } = await import('@/lib/path')
+    const appDir = getBuildsDir(id)
     await fs.rm(appDir, { recursive: true, force: true }).catch(console.warn)
 
     // 3. Remove from JSON DB

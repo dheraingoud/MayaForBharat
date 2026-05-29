@@ -32,7 +32,8 @@ export async function POST(request: Request) {
       })
     }
 
-    const appDir = path.join(process.cwd(), '.maya-builds', appId)
+    const { getBuildsDir } = await import('@/lib/path')
+    const appDir = getBuildsDir(appId)
     const pendingPath = path.join(appDir, '.maya', 'pending-improvements.json')
     
     let pending = []
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
           const deployRes = await deployToVercel({
             appId,
             projectName: app.name,
-            directory: path.join(process.cwd(), '.maya-builds', appId),
+            directory: getBuildsDir(appId),
             target: 'production'
           })
           

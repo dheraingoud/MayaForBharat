@@ -4,6 +4,7 @@ import { readEpisodes } from '@/lib/memory/autoDream'
 import { promises as fs } from 'fs'
 import path from 'path'
 import type { BuiltApp } from '@/lib/store'
+import { getBuildsDir } from '@/lib/path'
 
 export const runtime = 'nodejs'
 
@@ -29,7 +30,7 @@ export async function GET() {
   const store = await readStore()
 
   const apps = await Promise.all(store.map(async (app: BuiltApp) => {
-    const appDir = path.join(process.cwd(), '.maya-builds', app.id)
+    const appDir = getBuildsDir(app.id)
 
     // Check for pending improvements
     let hasPendingImprovements = false
