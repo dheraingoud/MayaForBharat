@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useLanguage } from '@/app/providers'
@@ -10,7 +10,7 @@ import { content } from '@/lib/translations'
 import { motion } from 'framer-motion'
 import { ArrowLeft, Check, X, Zap, Loader2 } from 'lucide-react'
 
-export default function ApprovalPage() {
+function ApprovalContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const appId = searchParams.get('appId')
@@ -300,5 +300,13 @@ export default function ApprovalPage() {
         </main>
       </div>
     </div>
+  )
+}
+
+export default function ApprovalPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-[#E8601A]" /></div>}>
+      <ApprovalContent />
+    </Suspense>
   )
 }
