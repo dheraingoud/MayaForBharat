@@ -478,12 +478,12 @@ export default function RecordPage() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.6 }}
-              className="flex flex-col items-center justify-center py-12 sm:py-20"
+              className={`flex items-start md:items-center justify-center py-12 sm:py-20 transition-all duration-500 w-full ${isListening ? 'flex-col md:flex-row gap-8 lg:gap-16' : 'flex-col gap-6'}`}
             >
               {!transcription ? (
                 <>
                   {/* Mic Area with advanced UX */}
-                  <div className="relative flex flex-col items-center">
+                  <div className="relative flex flex-col items-center flex-shrink-0">
                     <MicButton
                       isListening={isListening}
                       isProcessing={isProcessing}
@@ -524,11 +524,11 @@ export default function RecordPage() {
                   <AnimatePresence>
                     {isListening && (
                       <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
                         transition={{ duration: 0.3 }}
-                        className="mt-6 w-full max-w-md"
+                        className="w-full max-w-md"
                       >
                         <div className="bg-white/80 dark:bg-[#2A2925]/80 backdrop-blur-sm rounded-2xl border border-[#E4E1DA] dark:border-white/10 p-4 min-h-[60px]">
                           <p className="text-xs font-semibold text-[#6B6560] dark:text-[#9E9890] uppercase tracking-wider mb-1">

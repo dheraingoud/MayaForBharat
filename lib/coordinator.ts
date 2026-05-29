@@ -16,7 +16,7 @@
  */
 
 import { execSync } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, promises as fsp } from 'fs'
 import path from 'path'
 
 // ─── Package Manager Detection ─────────────────────────────────────────────────
@@ -66,12 +66,45 @@ export interface CoordinatorConfig {
   maxScreenshotDiffPct: number
   /** Whether to attempt auto-fix on gate 3/4 failure */
   enableAutoFix: boolean
+  /** Max proposals to execute per evolution cycle — rest saved for next day */
+  maxProposalsPerCycle: number
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
   maxDiffLines: 150,
   maxScreenshotDiffPct: 5,
   enableAutoFix: true,
+  /** Max proposals to execute per evolution cycle (save the rest for next day) */
+  maxProposalsPerCycle: 2,
+}
+
+// ─── Pending Proposal Queue ────────────────────────────────────────────────────
+// Proposals that pass the proposer but exceed the daily cap are saved to disk
+// and loaded at the start of the next evolution cycle.
+
+const PENDING_QUEUE_FILE = (appId: string) =>
+  path.join(process.cwd(), '.maya-builds', appId, 'pending-proposals.json')
+
+async function loadPendingProposals(appId: string): Promise<Proposal[]> {
+  try {
+    const file = PENDING_QUEUE_FILE(appId)
+    const raw = await fsp.readFile(file, 'utf-8')
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as Proposal[] : []
+  } catch {
+    return []
+  }
+}
+
+async function savePendingProposals(appId: string, proposals: Proposal[]): Promise<void> {
+  try {
+    const file = PENDING_QUEUE_FILE(appId)
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    await fsp.writeFile(file, JSON.stringify(proposals, null, 2), 'utf-8')
+    console.log(`[coordinator] Saved ${proposals.length} proposals to pending queue for ${appId}`)
+  } catch (e) {
+    console.warn('[coordinator] Failed to save pending proposals:', e)
+  }
 }
 
 // ─── Allowed Categories ───────────────────────────────────────────────────────
@@ -220,25 +253,9 @@ export async function coordinatorGate(
     }
   }
 
-  // ── GATE 5: Screenshot diff ────────────────────────────────────────────
-  try {
-    const screenshotResult = runScreenshotDiff(wtPath, config)
-    if (screenshotResult.diffPct > config.maxScreenshotDiffPct) {
-      return {
-        decision: 'discard',
-        failedGate: `screenshot_diff:${screenshotResult.diffPct.toFixed(1)}%`,
-        diffLines,
-        testsPassed: true,
-        screenshotDiffPct: screenshotResult.diffPct,
-      }
-    }
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e)
-    console.warn('[coordinator] Gate 5 (screenshot diff) threw:', error)
-    // Gate 5 failures are soft: if the diff can't be computed (e.g. no live URL),
-    // we don't discard based on it. This prevents the gate from blocking builds
-    // when Playwright/QA tools are not yet configured.
-  }
+  // ── GATE 5: Visual Diff (Moved to runEvolutionCycle) ───────────────────
+  // Gate 5 now requires deploying a Vercel Preview environment and running
+  // a Microlink screenshot diff, so it is handled in the orchestrator.
 
   // All gates passed
   return {
@@ -289,31 +306,7 @@ function runTests(cwd: string): { success: boolean; error: string } {
   }
 }
 
-interface ScreenshotDiffResult {
-  diffPct: number
-}
-
-/**
- * Gate 5: Screenshot visual diff.
- *
- * In a full setup this uses Playwright to capture the running app,
- * pixelmatch to diff against a baseline, and returns a percentage.
- *
- * For now, this is a soft gate: it returns 0 (pass) when Playwright is
- * not configured, so the gate never blocks a valid improvement. The
- * warning log alerts the developer to wire up Playwright when ready.
- */
-function runScreenshotDiff(
-  _wtPath: string,
-  _config: CoordinatorConfig
-): ScreenshotDiffResult {
-  // For hackathon and until Playwright is set up, this is a no-op pass.
-  // The console.warn signals the developer to wire this when ready.
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[coordinator] Gate 5 (screenshot diff) — pass (Playwright not configured)')
-  }
-  return { diffPct: 0 }
-}
+// Removed legacy runScreenshotDiff since we now use screenshot.ts directly
 
 // ─── Full Evolution Cycle ─────────────────────────────────────────────────────
 // Orchestrates: Observer -> Proposer -> Builder -> Gates -> Merge
@@ -383,10 +376,10 @@ export async function runEvolutionCycle(
   result.signals = { hasSignal: domSignals.hasSignal }
   if (!domSignals.hasSignal) return result
 
-  // ── Step 2: Proposer ───────────────────────────────────────────────────
-  let proposals
+  // ── Step 2: Proposer —— generate fresh proposals + merge with pending queue —
+  let freshProposals: Proposal[] = []
   try {
-    proposals = await proposerAgent(
+    freshProposals = await proposerAgent(
       {
         name: app.name,
         description: app.description,
@@ -403,8 +396,35 @@ export async function runEvolutionCycle(
     return result
   }
 
-  result.proposals = proposals.length
-  if (proposals.length === 0) return result
+  // Load any proposals saved from previous cycles (overflow queue)
+  const pendingFromPrevious = await loadPendingProposals(app.id)
+  console.log(`[coordinator] Loaded ${pendingFromPrevious.length} pending proposals from previous cycles`)
+
+  // Merge: fresh proposals go first (highest priority), then pending
+  // Deduplicate by titleEn to avoid running the same proposal twice
+  const seen = new Set<string>()
+  const allProposals: Proposal[] = []
+  for (const p of [...freshProposals, ...pendingFromPrevious]) {
+    if (!seen.has(p.titleEn)) {
+      seen.add(p.titleEn)
+      allProposals.push(p)
+    }
+  }
+
+  result.proposals = allProposals.length
+  if (allProposals.length === 0) return result
+
+  // Apply daily cap — execute at most maxProposalsPerCycle, save the rest
+  const cap = (config.maxProposalsPerCycle ?? 2)
+  const proposals = allProposals.slice(0, cap)
+  const overflow = allProposals.slice(cap)
+  if (overflow.length > 0) {
+    console.log(`[coordinator] Daily cap: running ${proposals.length} proposals, saving ${overflow.length} for next cycle`)
+    await savePendingProposals(app.id, overflow)
+  } else {
+    // Clear stale queue if everything fits
+    await savePendingProposals(app.id, [])
+  }
 
   // ── Step 3: Build + Gate each proposal sequentially ────────────────────
   // Sequential, NOT parallel (isConcurrencySafe = false for merges)
@@ -447,17 +467,73 @@ export async function runEvolutionCycle(
         continue
       }
 
-      // Merge to main (sequential — not concurrency safe)
-      const mergeResult = await mergeWorktree(
-        wtInfo,
-        `maya: ${proposal.titleEn}`
-      )
+      // ── GATE 5: Vercel Preview Visual QA ───────────────────────────────────
+      // If tests pass, deploy a preview to Vercel and diff it against production.
+      let previewUrl = ''
+      try {
+        const { deployToVercel, deleteVercelDeployment } = await import('./deploy')
+        const { screenshotDiff } = await import('./tools/screenshot')
 
-      if (mergeResult.success) {
-        result.merged++
-      } else {
-        result.errors.push(`Merge failed: ${mergeResult.error}`)
-        await discardWorktree(wtInfo)
+        console.log(`[coordinator] Deploying Preview for Gate 5: ${proposal.titleEn}`)
+        const preview = await deployToVercel({
+          appId: app.id,
+          projectName: app.name,
+          directory: wtInfo.wtPath,
+          target: 'preview'
+        })
+        
+        previewUrl = preview.url
+        console.log(`[coordinator] Preview deployed: ${previewUrl}`)
+
+        // Ask the visual tester agent (via screenshot.ts diff) to evaluate
+        const diffResult = await screenshotDiff(app.vercelUrl, previewUrl)
+        
+        if (diffResult.diffPct > config.maxScreenshotDiffPct) {
+          result.gateFailures.push({ gate: 'visual_regression', count: 1 })
+          await deleteVercelDeployment(previewUrl).catch(() => {})
+          await discardWorktree(wtInfo)
+          continue
+        }
+
+        // Cleanup the preview deployment to keep dashboard clean
+        await deleteVercelDeployment(previewUrl).catch(() => {})
+        
+      } catch (e) {
+        // Soft-fail: if preview deployment or visual QA fails (e.g. no deploy token, Microlink rate limit)
+        // we DO NOT discard the build. We allow it to merge (v0 behavior fallback).
+        console.warn(`[coordinator] Gate 5 visual QA failed (soft-pass):`, String(e).slice(0, 200))
+        if (previewUrl) {
+          const { deleteVercelDeployment } = await import('./deploy')
+          await deleteVercelDeployment(previewUrl).catch(() => {})
+        }
+      }
+
+      // Save to pending improvements queue for user approval instead of auto-merging
+      try {
+        const pendingPath = path.join(process.cwd(), '.maya-builds', app.id, '.maya', 'pending-improvements.json')
+        await fsp.mkdir(path.dirname(pendingPath), { recursive: true })
+        let pending = []
+        try {
+          const raw = await fsp.readFile(pendingPath, 'utf-8')
+          pending = JSON.parse(raw)
+        } catch {}
+        
+        pending.push({
+          id: `imp-${Date.now()}`,
+          title: proposal.titleEn,
+          description: proposal.descriptionEn || proposal.titleEn,
+          category: proposal.category,
+          timestamp: new Date().toISOString(),
+          wtInfo: wtInfo // Keep worktree info so it can be merged on approval
+        })
+        
+        await fsp.writeFile(pendingPath, JSON.stringify(pending, null, 2))
+        result.merged++ // Count as success for the cycle
+        console.log(`[coordinator] Saved improvement to pending approval: ${proposal.titleEn}`)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        result.errors.push(`Failed to save pending improvement: ${error}`)
+        await discardWorktree(wtInfo).catch(() => {})
       }
     } catch (e: unknown) {
       const error = e instanceof Error ? e.message : String(e)

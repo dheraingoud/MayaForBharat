@@ -11,10 +11,11 @@
  * - Structured result extraction
  */
 
-import { getNimClient, nimCallWithRetry, type ModelConfig, type ChatMessage } from './nim-client'
+import { nimChat, type ModelConfig, type ChatMessage } from './nim-client'
 import type { MayaTool } from './tools/registry'
 import type { ChatCompletion } from 'openai/resources/chat/completions'
 import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
+import { getNimClient, nimCallWithRetry } from './nim-client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,8 +101,7 @@ export async function agentLoop(config: AgentConfig): Promise<AgentResult> {
     // No tool calls = agent is done
     if (
       choice.finish_reason === 'stop' ||
-      !assistantMessage.tool_calls ||
-      assistantMessage.tool_calls.length === 0
+      (choice.finish_reason !== 'tool_calls' && !assistantMessage.tool_calls?.length)
     ) {
       return {
         content: assistantMessage.content ?? '',
@@ -120,7 +120,7 @@ export async function agentLoop(config: AgentConfig): Promise<AgentResult> {
     })
 
     // Execute each tool call sequentially (Claude Code isConcurrencySafe pattern)
-    for (const toolCall of assistantMessage.tool_calls) {
+    for (const toolCall of assistantMessage.tool_calls ?? []) {
       // Skip non-function tool calls (OpenAI SDK v4 union type)
       if (toolCall.type !== 'function') continue
 
@@ -206,36 +206,21 @@ export async function simpleChat(config: {
     systemPrompt,
     userInput,
     caveman = true,
-    responseFormat,
     maxTokensOverride,
   } = config
 
   const prefix = caveman ? '[CAVEMAN] ' : ''
 
-  const result = await nimCallWithRetry(async (client) => {
-    const params: Record<string, unknown> = {
-      model: model.id,
-      messages: [
-        { role: 'system', content: `${prefix}${systemPrompt}` },
-        { role: 'user', content: userInput },
-      ],
-      max_tokens: maxTokensOverride ?? model.maxTokens,
-      temperature: model.temperature ?? 1,
-      top_p: model.topP ?? 1,
-    }
-
-    if (model.thinking) {
-      params.chat_template_kwargs = model.thinking
-    }
-
-    if (responseFormat) {
-      params.response_format = responseFormat
-    }
-
-    return client.chat.completions.create(params as unknown as ChatCompletionCreateParamsNonStreaming)
+  // Delegate to nimChat which has full retry/fallback/timeout logic
+  return nimChat({
+    model,
+    messages: [
+      { role: 'system', content: `${prefix}${systemPrompt}` },
+      { role: 'user', content: userInput },
+    ],
+    maxTokensOverride,
+    allowFallback: true,
   })
-
-  return result.choices[0]?.message?.content ?? ''
 }
 
 // ─── JSON Chat (with parsing) ─────────────────────────────────────────────────
@@ -247,10 +232,7 @@ export async function simpleChatJSON<T = unknown>(config: {
   caveman?: boolean
   maxTokensOverride?: number
 }): Promise<T> {
-  const raw = await simpleChat({
-    ...config,
-    responseFormat: { type: 'json_object' },
-  })
+  const raw = await simpleChat(config)
 
   try {
     return JSON.parse(raw) as T

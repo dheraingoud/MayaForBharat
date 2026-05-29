@@ -18,6 +18,9 @@ interface AppData {
   projectId: string
   createdAt: string
   status: 'live' | 'building'
+  adminUsername?: string
+  adminPin?: string
+  shownToOwner?: boolean
 }
 
 export default function AppDetailPage() {
@@ -39,18 +42,28 @@ export default function AppDetailPage() {
       .then(data => {
         const found = data.apps?.find((a: { id: string }) => a.id === appId)
         if (found) {
-          setApp({
-            id: found.id,
-            name: found.nameKey,
-            nameHindi: found.nameHindi,
-            descriptionEn: found.descriptionEn,
-            category: found.typeKey,
-            url: found.url || '',
-            projectId: found.projectId || '',
-            createdAt: found.createdAt || new Date().toISOString(),
-            status: found.status || 'live',
-          })
-        }
+            setApp({
+              id: found.id,
+              name: found.nameKey || found.name,
+              nameHindi: found.nameHindi,
+              descriptionEn: found.descriptionEn,
+              category: found.typeKey || found.category,
+              url: found.url || '',
+              projectId: found.projectId || '',
+              createdAt: found.createdAt || new Date().toISOString(),
+              status: found.status || 'live',
+              adminUsername: found.adminUsername,
+              adminPin: found.adminPin,
+              shownToOwner: found.shownToOwner,
+            })
+            
+            // If shownToOwner is false, flip it to true after 2 seconds
+            if (found.adminPin && !found.shownToOwner) {
+              setTimeout(() => {
+                fetch(`/api/apps/${found.id}`, { method: 'PATCH' }).catch(console.error)
+              }, 2000)
+            }
+          }
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -193,6 +206,39 @@ export default function AppDetailPage() {
                     {language === 'hi' ? 'विकास लॉग देखें' : 'View Evolution Log'}
                   </motion.button>
                 </div>
+
+                {/* Admin Access Card */}
+                {app.adminUsername && (
+                  <div className="bg-[#FFF8F5] dark:bg-[#2A231F] rounded-3xl border border-[#FADCD0] dark:border-[#E8601A]/30 p-6 space-y-4">
+                    <h3 className="text-sm font-semibold text-[#E8601A] uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <span>🔑</span> {language === 'hi' ? 'व्यवस्थापक पहुँच' : 'Admin Access'}
+                    </h3>
+                    <p className="text-xs text-[#6B6560] dark:text-[#9E9890] leading-relaxed">
+                      {language === 'hi' 
+                        ? 'आपका एडमिन पैनल /admin पर है। अपने क्रेडेंशियल्स सेव करें।' 
+                        : 'Your admin panel is at /admin. Save your credentials.'}
+                    </p>
+                    
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center bg-white dark:bg-[#1A1917] px-4 py-3 rounded-xl border border-[#FADCD0] dark:border-[#E8601A]/20">
+                        <span className="text-xs font-semibold text-[#6B6560] dark:text-[#9E9890]">Username</span>
+                        <span className="text-sm font-bold text-[#1A1917] dark:text-white font-mono">{app.adminUsername}</span>
+                      </div>
+                      <div className="flex justify-between items-center bg-white dark:bg-[#1A1917] px-4 py-3 rounded-xl border border-[#FADCD0] dark:border-[#E8601A]/20">
+                        <span className="text-xs font-semibold text-[#6B6560] dark:text-[#9E9890]">PIN</span>
+                        <span className="text-sm font-bold text-[#E8601A] font-mono tracking-widest">
+                          {app.shownToOwner ? '****' : app.adminPin}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!app.shownToOwner && (
+                      <p className="text-[10px] text-red-500 font-semibold mt-2 text-center">
+                        {language === 'hi' ? 'यह पिन दोबारा नहीं दिखाया जाएगा' : '⚠ Save this. It won\'t be shown again.'}
+                      </p>
+                    )}
+                  </div>
+                )}
               </motion.div>
 
               {/* Live Preview iframe */}
@@ -235,8 +281,11 @@ export default function AppDetailPage() {
                       <div className="absolute inset-0 flex items-center justify-center bg-[#F5F4F0] dark:bg-[#1A1917]">
                         <div className="text-center">
                           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E8601A] mx-auto mb-3" />
-                          <p className="text-sm text-[#9E9890]">
-                            {language === 'hi' ? 'लोड हो रहा है...' : 'Loading preview...'}
+                          <p className="text-sm font-semibold text-[#1A1917] dark:text-white mb-1">
+                            {language === 'hi' ? 'बिल्ड हो रहा है...' : 'Building Environment...'}
+                          </p>
+                          <p className="text-xs text-[#9E9890]">
+                            {language === 'hi' ? 'कृपया प्रतीक्षा करें...' : 'This may take a few moments...'}
                           </p>
                         </div>
                       </div>

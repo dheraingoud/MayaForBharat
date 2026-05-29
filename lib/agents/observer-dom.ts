@@ -1,6 +1,6 @@
 /**
  * MAYA Observer (DOM) — Lightweight log/signal analysis
- * Model: meta/llama-3.3-70b-instruct (saves GLM RPM)
+ * Model: stepfun-ai/step-3.7-flash (fast, accurate structured JSON)
  *
  * Fires first in the evolution cycle. If hasSignal === false,
  * the entire cycle short-circuits (saves all downstream tokens).

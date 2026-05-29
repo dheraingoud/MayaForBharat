@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { runEvolutionCycle } from '@/lib/coordinator'
 import { readMayaMd, readSemantic } from '@/lib/memory/autoDream'
 import { readEpisodes } from '@/lib/memory/autoDream'
+import { getApp } from '@/lib/store'
 import path from 'path'
 
 export const runtime = 'nodejs'
@@ -17,6 +18,12 @@ export async function POST(request: Request) {
         { error: 'Missing required fields: appId, name, vercelUrl' },
         { status: 400 }
       )
+    }
+
+    const appExists = await getApp(appId)
+    if (!appExists) {
+      console.warn(`[api/evolution] Aborting evolution: App ${appId} has been deleted.`)
+      return NextResponse.json({ error: 'App not found or deleted' }, { status: 404 })
     }
 
     const appDir = path.join(process.cwd(), '.maya-builds', appId)

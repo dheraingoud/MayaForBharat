@@ -41,22 +41,22 @@ India has over 60 million small businesses. The vast majority of them will never
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#E8601A', 'primaryTextColor': '#fff', 'primaryBorderColor': '#C94E12', 'lineColor': '#888888', 'secondaryColor': '#F5F4F0', 'tertiaryColor': '#FFF3ED', 'fontFamily': 'sans-serif' }}}%%
 flowchart LR
-    A["<b>SPEAK</b><br/>Your voice in<br/>Hindi or English"] --> B["<b>TRANSCRIBE</b><br/>Whisper V3<br/>transcription"]
-    B --> C["<b>EXTRACT INTENT</b><br/>Structured JSON<br/>from Hindi text"]
-    C --> D["<b>BUILD</b><br/>Full Next.js<br/>application"]
-    D --> E["<b>VALIDATE</b><br/>JSON + code<br/>structure check"]
-    E --> F["<b>SANITIZE</b><br/>File safety<br/>checks"]
-    F --> G["<b>DEPLOY</b><br/>Vercel<br/>production"]
-    G --> H["<b>SHARE</b><br/>Live URL<br/>in 3 min"]
+    A["<b>SPEAK</b><br/>Your voice in<br/>Hindi or English"] -->|Audio| B["<b>TRANSCRIBE</b><br/>Whisper V3<br/>transcription"]
+    B -->|Hindi Text| C["<b>EXTRACT INTENT</b><br/>Structured JSON<br/>from Hindi text"]
+    C -->|App Spec| D["<b>BUILD</b><br/>Full Next.js<br/>application"]
+    D -->|Raw Code| E["<b>VALIDATE</b><br/>JSON + File<br/>structure check"]
+    E -->|Sanitized Files| REV["<b>AI REVIEW</b><br/>Llama 3.3 Strict<br/>Compiler Pass"]
+    REV -->|Self-Healed Code| F["<b>DEPLOY</b><br/>Vercel<br/>production"]
+    F -->|Live App| G["<b>SHARE</b><br/>Live URL<br/>in 3 min"]
 
     style A fill:#E8601A,stroke:#C94E12,color:#fff
     style B fill:#2563eb,stroke:#1d4ed8,color:#fff
     style C fill:#7c3aed,stroke:#6d28d9,color:#fff
     style D fill:#E8601A,stroke:#C94E12,color:#fff
-    style E fill:#059669,stroke:#047857,color:#fff
-    style F fill:#d97706,stroke:#b45309,color:#fff
-    style G fill:#1A1917,stroke:#3f3f46,color:#fff
-    style H fill:#059669,stroke:#047857,color:#fff
+    style E fill:#d97706,stroke:#b45309,color:#fff
+    style REV fill:#dc2626,stroke:#b91c1c,color:#fff
+    style F fill:#1A1917,stroke:#3f3f46,color:#fff
+    style G fill:#059669,stroke:#047857,color:#fff
 ```
 
 <br/>
@@ -72,16 +72,18 @@ flowchart LR
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'sans-serif', 'lineColor': '#888888' }}}%%
 flowchart TD
-    A["Record"] --> B["Transcribe"]
-    B --> C["Extract Intent"]
-    C --> D["Generate Code"]
-    D --> E["Deploy"]
-    E --> F["Live URL"]
+    A["Record"] -->|Audio Blob| B["Transcribe"]
+    B -->|Transcribed Text| C["Extract Intent"]
+    C -->|JSON Spec| D["Generate Code"]
+    D -->|Generated Files| REV["AI Code Review"]
+    REV -->|Self-Healed Files| E["Deploy"]
+    E -->|Vercel URL| F["Live URL"]
 
     style A fill:#E8601A,stroke:#C94E12,color:#fff
     style B fill:#2563eb,stroke:#1d4ed8,color:#fff
     style C fill:#7c3aed,stroke:#6d28d9,color:#fff
     style D fill:#E8601A,stroke:#C94E12,color:#fff
+    style REV fill:#dc2626,stroke:#b91c1c,color:#fff
     style E fill:#1A1917,stroke:#3f3f46,color:#fff
     style F fill:#059669,stroke:#047857,color:#fff
 ```

@@ -53,7 +53,7 @@ export default function AppEvolutionPage() {
       await fetch('/api/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ improvementId: entryId, decision: 'approve' }),
+        body: JSON.stringify({ appId, improvementId: entryId, decision: 'accept' }),
       })
       // Update local state
       setData(prev => prev ? {
@@ -76,7 +76,7 @@ export default function AppEvolutionPage() {
       await fetch('/api/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ improvementId: entryId, decision: 'reject' }),
+        body: JSON.stringify({ appId, improvementId: entryId, decision: 'reject' }),
       })
       setData(prev => prev ? {
         ...prev,

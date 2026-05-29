@@ -48,6 +48,7 @@ export default function BuilderPage() {
   const [buildError, setBuildError] = useState<string | null>(null)
   const [builtAppId, setBuiltAppId] = useState<string | null>(null)
   const [builtUrl, setBuiltUrl] = useState<string | null>(null)
+  const [sseMessage, setSseMessage] = useState<string>('')
 
   useEffect(() => {
     setMounted(true)
@@ -83,12 +84,8 @@ export default function BuilderPage() {
     if (!spec || buildStage !== 'idle') return
     setBuildError(null)
 
-    // Stage 1: Preparing
     setBuildStage('preparing')
-    await new Promise(r => setTimeout(r, 500))
-
-    // Stage 2: Generating code
-    setBuildStage('generating')
+    setSseMessage('Connecting to builder...')
 
     try {
       const res = await fetch('/api/build', {
@@ -101,32 +98,75 @@ export default function BuilderPage() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        const msg = body.code === 'NO_NIM_KEYS'
-          ? 'NIM API keys are missing. App generation requires NVIDIA NIM keys. Add NVIDIA_API_KEY_* to .env.local.'
-          : body.code === 'NIM_TIMEOUT'
-          ? 'NIM API timed out. The service may be temporarily unavailable or your keys are invalid. Check .env.local.'
-          : (body.error || `Build failed: ${res.status}`)
-        setBuildError(msg)
+        setBuildError(body.error || `Build failed: ${res.status}`)
         setBuildStage('error')
         return
       }
 
-      // Stage 3: Deploying
-      setBuildStage('deploying')
-      const data = await res.json()
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No stream returned from build API')
+      const decoder = new TextDecoder()
 
-      // Stage 4: Done
-      setBuildStage('done')
-      setBuiltAppId(data.appId)
-      setBuiltUrl(data.url)
+      let currentAppId = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      // Clear spec so user can make a new app
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data.type === 'stage') {
+                setBuildStage(data.stage)
+              } else if (data.type === 'progress') {
+                if (data.message.includes('chunks')) {
+                  const match = data.message.match(/chunks\.\.\. (\d+)/)
+                  const count = match ? match[1] : ''
+                  setSseMessage(language === 'hi' ? `कोड लिख रहा हूँ... (${count} चंक्स)` : `Writing application code... (${count} chunks)`)
+                } else if (data.message.includes('Retrying')) {
+                  setSseMessage(language === 'hi' ? 'कोड सुधार रहा हूँ...' : 'Optimizing application code...')
+                } else if (data.message === 'building_code') {
+                  setSseMessage(language === 'hi' ? 'ऐप का निर्माण शुरू कर रहा हूँ...' : 'Starting application build...')
+                } else if (data.message.startsWith('building ')) {
+                  const filename = data.message.replace('building ', '')
+                  setSseMessage(language === 'hi' ? `फाइल बना रहा हूँ: ${filename}` : `Building file: ${filename}`)
+                } else if (data.message.startsWith('Estimating size:')) {
+                  if (language === 'hi') {
+                    const pages = data.message.match(/\((\d+) pages\)/)?.[1] || ''
+                    const scaleMatch = data.message.match(/size: (\w+) scale/)?.[1] || 'Medium'
+                    const scaleHi = scaleMatch === 'Small' ? 'छोटा' : scaleMatch === 'Large' ? 'बड़ा' : 'मध्यम'
+                    setSseMessage(`अनुमानित आकार: ${scaleHi} स्तर (${pages} पेजेज़). योजना बना रहा हूँ...`)
+                  } else {
+                    setSseMessage(data.message)
+                  }
+                } else {
+                  setSseMessage(data.message)
+                }
+              } else if (data.type === 'error') {
+                setBuildError(data.message)
+                setBuildStage('error')
+              } else if (data.type === 'done') {
+                setBuildStage('done')
+                setBuiltAppId(data.appId)
+                setBuiltUrl(data.url)
+                currentAppId = data.appId
+              }
+            } catch (e) {
+              console.warn('Failed to parse SSE line', line)
+            }
+          }
+        }
+      }
+
       localStorage.removeItem('maya-app-spec')
 
-      // Auto-redirect after 2s
-      setTimeout(() => {
-        router.push(`/app/${data.appId}`)
-      }, 2000)
+      if (currentAppId) {
+        setTimeout(() => {
+          router.push(`/app/${currentAppId}`)
+        }, 2000)
+      }
     } catch (e: unknown) {
       setBuildError(e instanceof Error ? e.message : 'Unknown error')
       setBuildStage('error')
@@ -164,59 +204,63 @@ export default function BuilderPage() {
               </p>
             </motion.div>
 
-            {/* Spec Summary */}
-            <motion.div
-              variants={fadeInUp}
-              className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-6 sm:p-8"
-            >
-              <h2 className="text-lg font-bold mb-2">
-                {t.builder.detectedSpec}
-              </h2>
-              <div className="text-sm text-[#6B6560] dark:text-[#9E9890] space-y-1">
-                <p><span className="font-semibold">{t.builder.name}:</span> {spec.name}</p>
-                <p><span className="font-semibold">{t.builder.category}:</span> {spec.category}</p>
-                <p><span className="font-semibold">{t.builder.user}:</span> {spec.userType}</p>
-              </div>
-            </motion.div>
+            {/* Spec Summary - Hide if English or building */}
+            {language !== 'en' && !isBuilding && (
+              <motion.div
+                variants={fadeInUp}
+                className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-6 sm:p-8"
+              >
+                <h2 className="text-lg font-bold mb-2">
+                  {t.builder.detectedSpec}
+                </h2>
+                <div className="text-sm text-[#6B6560] dark:text-[#9E9890] space-y-1">
+                  <p><span className="font-semibold">{t.builder.name}:</span> {spec.nameHindi || spec.name}</p>
+                  <p><span className="font-semibold">{t.builder.category}:</span> {spec.category}</p>
+                  <p><span className="font-semibold">{t.builder.user}:</span> {spec.userType}</p>
+                </div>
+              </motion.div>
+            )}
 
-            {/* Form Section */}
-            <motion.div
-              variants={fadeInUp}
-              className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-8 sm:p-12 space-y-6"
-            >
-              <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-3">
-                <Settings className="w-6 h-6" />
-                {t.builder.appInfo}
-              </h2>
+            {/* Form Section - Hide if building */}
+            {!isBuilding && (
+              <motion.div
+                variants={fadeInUp}
+                className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-8 sm:p-12 space-y-6"
+              >
+                <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-3">
+                  <Settings className="w-6 h-6" />
+                  {t.builder.appInfo}
+                </h2>
 
-              <div>
-                <label className="block text-sm font-semibold mb-3 text-[#1A1917] dark:text-white">
-                  {t.builder.appName}
-                </label>
-                <input
-                  type="text"
-                  value={appName}
-                  onChange={(e) => setAppName(e.target.value)}
-                  placeholder={t.builder.placeholder}
-                  disabled={isBuilding}
-                  className="w-full px-5 py-3 rounded-2xl border border-[#E4E1DA] dark:border-white/10 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-white placeholder-[#6B6560] dark:placeholder-[#9E9890] focus:outline-none focus:ring-2 focus:ring-[#E8601A] transition-all disabled:opacity-50"
-                />
-              </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-3 text-[#1A1917] dark:text-white">
+                    {t.builder.appName}
+                  </label>
+                  <input
+                    type="text"
+                    value={appName}
+                    onChange={(e) => setAppName(e.target.value)}
+                    placeholder={t.builder.placeholder}
+                    disabled={isBuilding}
+                    className="w-full px-5 py-3 rounded-2xl border border-[#E4E1DA] dark:border-white/10 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-white placeholder-[#6B6560] dark:placeholder-[#9E9890] focus:outline-none focus:ring-2 focus:ring-[#E8601A] transition-all disabled:opacity-50"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-semibold mb-3 text-[#1A1917] dark:text-white">
-                  {t.builder.description}
-                </label>
-                <textarea
-                  value={appDescription}
-                  onChange={(e) => setAppDescription(e.target.value)}
-                  placeholder={t.builder.descPlaceholder}
-                  rows={4}
-                  disabled={isBuilding}
-                  className="w-full px-5 py-3 rounded-2xl border border-[#E4E1DA] dark:border-white/10 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-white placeholder-[#6B6560] dark:placeholder-[#9E9890] focus:outline-none focus:ring-2 focus:ring-[#E8601A] transition-all resize-none disabled:opacity-50"
-                />
-              </div>
-            </motion.div>
+                <div>
+                  <label className="block text-sm font-semibold mb-3 text-[#1A1917] dark:text-white">
+                    {t.builder.description}
+                  </label>
+                  <textarea
+                    value={appDescription}
+                    onChange={(e) => setAppDescription(e.target.value)}
+                    placeholder={t.builder.descPlaceholder}
+                    rows={4}
+                    disabled={isBuilding}
+                    className="w-full px-5 py-3 rounded-2xl border border-[#E4E1DA] dark:border-white/10 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-white placeholder-[#6B6560] dark:placeholder-[#9E9890] focus:outline-none focus:ring-2 focus:ring-[#E8601A] transition-all resize-none disabled:opacity-50"
+                  />
+                </div>
+              </motion.div>
+            )}
 
             {/* Build Progress Indicator */}
             <AnimatePresence>
@@ -248,12 +292,17 @@ export default function BuilderPage() {
                   </div>
 
                   {/* Stage description */}
-                  {buildStage === 'generating' && (
-                    <p className="text-xs text-[#9E9890] mt-2">
-                      {language === 'hi'
-                        ? 'AI आपके बिज़नेस के लिए कस्टम Next.js ऐप लिख रहा है। इसमें 1-2 मिनट लग सकते हैं...'
-                        : 'AI is writing a custom Next.js app for your business. This may take 1-2 minutes...'}
-                    </p>
+                  {buildStage !== 'done' && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-sm font-medium text-[#1A1917] dark:text-white">
+                        {sseMessage}
+                      </p>
+                      <p className="text-xs text-[#9E9890]">
+                        {language === 'hi'
+                          ? 'AI आपके बिज़नेस के लिए कस्टम Next.js ऐप लिख रहा है। इसमें 1-2 मिनट लग सकते हैं...'
+                          : 'AI is writing a custom Next.js app for your business. This might take a few minutes for complete build to test process.'}
+                      </p>
+                    </div>
                   )}
 
                   {/* Done: show link */}
@@ -344,7 +393,7 @@ export default function BuilderPage() {
 
         <footer className="border-t border-[#E4E1DA] dark:border-white/10 py-12 sm:py-16 px-5 sm:px-8 lg:px-12">
           <div className="max-w-6xl mx-auto text-center text-sm text-[#6B6560] dark:text-[#9E9890]">
-            <p>© 2024 MAYA. {t.builder.allRights}</p>
+            <p>© 2026 MAYA. {t.builder.allRights}</p>
           </div>
         </footer>
       </div>

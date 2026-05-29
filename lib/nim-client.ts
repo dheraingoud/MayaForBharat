@@ -64,83 +64,95 @@ export type ModelConfig = {
 }
 
 export const MODELS = {
-  /** DeepSeek V4 Flash — THE code writer. Blazing fast, high token output */
+  /** Llama 3.3 70B Instruct — THE code writer. Blazing fast, high token output */
   BUILDER: {
-    id: 'deepseek-ai/deepseek-v4-flash',
+    id: 'meta/llama-3.3-70b-instruct',
     maxTokens: 16384,
-    thinking: { thinking: true, reasoning_effort: 'high' },
+    thinking: null,
     temperature: 1,
     topP: 1,
     maxTools: 25,
   },
 
-  /** Kimi K2.6 — Planner / Proposer. Reasons about what to improve */
+  /** Step 3.7 Flash — Fast, high-IQ model for drafting the architecture blueprint */
+  PLANNER: {
+    id: 'stepfun-ai/step-3.7-flash',
+    maxTokens: 4096,
+    thinking: null,
+    temperature: 1,
+    topP: 1,
+    maxTools: 10,
+  },
+
+  /** Kimi K2.6 — Proposer. Reasons about what to improve */
   PROPOSER: {
     id: 'moonshotai/kimi-k2.6',
     maxTokens: 4096,
     thinking: { thinking: true },
     temperature: 1,
-    topP: 0.95,
+    topP: 1,
     maxTools: 15,
   },
 
-  /** GLM-5.1 — Memory consolidation (autoDream). Reliable for structured JSON */
+  /** GLM-5.1 — Memory consolidation (autoDream). Reliable for structured JSON.
+   *  High token budget so the model can deeply reason about cross-cycle patterns. */
   AUTO_DREAM: {
     id: 'z-ai/glm-5.1',
-    maxTokens: 8192,
+    maxTokens: 16384,
     thinking: { enable_thinking: true, clear_thinking: false },
     temperature: 0.7,
     topP: 0.9,
     maxTools: 25,
   },
 
-  /** GLM-5.1 — Intent extraction from Hindi voice. Structured JSON output */
+  /** Llama 4 Maverick 17B — ONLY used for intent extraction from Hindi voice.
+   *  Strong Hindi NLP, large context window, reliable structured JSON output. */
   INTENT: {
-    id: 'z-ai/glm-5.1',
-    maxTokens: 8192,
-    thinking: { enable_thinking: true, clear_thinking: false },
+    id: 'meta/llama-3.3-70b-instruct',
+    maxTokens: 4096,
+    thinking: null, // Llama 3.3 does not use reasoning kwargs
     temperature: 0.5,
     topP: 0.9,
+    maxTools: 20,
+  },
+
+  /** Step 3.7 Flash — DOM / structural analysis. Fast, accurate, no vision needed here */
+  OBSERVER_DOM: {
+    id: 'stepfun-ai/step-3.7-flash',
+    maxTokens: 4096,
+    thinking: null,
+    temperature: 1,
+    topP: 0.95,
     maxTools: 25,
   },
 
-  /** Kimi K2.6 — DOM / structural analysis. Planner role */
-  OBSERVER_DOM: {
-    id: 'moonshotai/kimi-k2.6',
-    maxTokens: 4096,
-    thinking: { thinking: true },
-    temperature: 1,
-    topP: 0.8,
-    maxTools: 15,
-  },
-
-  /** Kimi K2.6 — Multimodal screenshot / vision analysis */
+  /** Step 3.7 Flash — Multimodal screenshot / vision analysis. Fast vision at low cost */
   OBSERVER_VISUAL: {
-    id: 'moonshotai/kimi-k2.6',
+    id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 8192,
-    thinking: { thinking: true },
+    thinking: null,
     temperature: 1,
     topP: 0.95,
-    maxTools: 15,
+    maxTools: 25,
   },
 
-  /** Kimi K2.6 — Multimodal QA and UI verification */
+  /** Step 3.7 Flash — Multimodal QA and UI verification. Fast screenshot-based testing */
   TESTER: {
-    id: 'moonshotai/kimi-k2.6',
+    id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 8192,
-    thinking: { thinking: true },
-    temperature: 0.5,
-    topP: 0.9,
+    thinking: null,
+    temperature: 1,
+    topP: 0.95,
     maxTools: 15,
   },
 
   /** DeepSeek V4 Flash — Fix router. Writer that fixes build/test failures */
   FIX_ROUTER: {
     id: 'deepseek-ai/deepseek-v4-flash',
-    maxTokens: 8192,
+    maxTokens: 10000,
     thinking: { thinking: true, reasoning_effort: 'high' },
     temperature: 1,
-    topP: 1,
+    topP: 0.95,
     maxTools: 25,
   },
 } as const satisfies Record<string, ModelConfig>
@@ -312,10 +324,6 @@ export async function nimCallWithRetry<T>(
 
       // Server error — retry with backoff
       if (status && status >= 500 && i < maxRetries - 1) {
-        if (lastError.message.includes('timeout') || lastError.message.includes('AbortError')) {
-          // On timeout, don't retry the same config — let nimChat handle fallback
-          throw lastError
-        }
         const backoffMs = 2000 * Math.pow(2, i)
         console.warn(`[nim] ${status} server error, retry in ${backoffMs}ms`)
         await new Promise(r => setTimeout(r, backoffMs))
@@ -345,12 +353,13 @@ export interface NimChatOptions {
   maxTokensOverride?: number
   tools?: unknown[]
   stream?: boolean
+  onChunk?: (text: string) => void
   /** When true, fallback to GLM-5.1 on failure */
   allowFallback?: boolean
 }
 
-// claude-proxy pattern: 90s timeout — NIM models need time for large generations
-const NIM_REQUEST_TIMEOUT_MS = 90_000
+// 10 minutes timeout — NIM models need time for large generations (Next.js full app)
+const NIM_REQUEST_TIMEOUT_MS = 600_000
 
 // claude-proxy pattern: reduced reasoning_budget for timeout retry
 const TIMEOUT_RETRY_REASONING_BUDGET = 8192
@@ -365,7 +374,7 @@ const TIMEOUT_RETRY_REASONING_BUDGET = 8192
  * Falls back to GLM-5.1 if allowFallback is true.
  */
 export async function nimChat(options: NimChatOptions): Promise<string> {
-  const { model, messages, responseFormat, maxTokensOverride, tools, allowFallback = true } = options
+  const { model, messages, responseFormat, maxTokensOverride, tools, stream, onChunk, allowFallback = true } = options
 
   // First attempt with primary model
   try {
@@ -375,6 +384,8 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
       responseFormat,
       maxTokensOverride,
       tools,
+      stream,
+      onChunk,
     })
     if (result && result.trim().length > 0) {
       return result
@@ -383,26 +394,24 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
     const errStatus = (e as { status?: number }).status
     const errMsg = (e as Error).message || ''
 
-    // claude-proxy: retry on timeout with reduced reasoning_budget
+    // On timeout/504 — skip reduced-reasoning retry, go straight to fallback
     if (errMsg.includes('timeout') || errMsg.includes('AbortError') || errStatus === 504) {
-      if (model.thinking) {
-        console.warn(`[nim] Timeout from ${model.id}, retrying with reduced reasoning_budget`)
+      if (allowFallback) {
+        console.warn(`[nim] Timeout from ${model.id}, trying fallback ${FALLBACK_MODEL.id}`)
         try {
-          const retryResult = await _doNimChat({
-            model: {
-              ...model,
-              thinking: { ...model.thinking, reasoning_budget: TIMEOUT_RETRY_REASONING_BUDGET },
-            },
+          const fallbackResult = await _doNimChat({
+            model: FALLBACK_MODEL,
             messages,
             responseFormat,
             maxTokensOverride,
             tools,
           })
-          if (retryResult && retryResult.trim().length > 0) return retryResult
+          if (fallbackResult && fallbackResult.trim().length > 0) return fallbackResult
         } catch {
-          // Fall through to fallback
+          // Fall through to re-throw
         }
       }
+      throw e
     }
 
     // claude-proxy: retry on 400 stripping problematic fields
@@ -420,6 +429,8 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
             responseFormat,
             maxTokensOverride,
             tools,
+            stream,
+            onChunk,
           })
           if (retryResult && retryResult.trim().length > 0) return retryResult
         } catch {
@@ -430,6 +441,7 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
 
     // For 500+ or empty response, try fallback if enabled
     if (allowFallback && (errStatus === undefined || errStatus >= 500 || errStatus === 400)) {
+      console.error(`[nim] Chat error with ${model.id}:`, e)
       console.warn(`[nim] Primary model ${model.id} failed, trying fallback ${FALLBACK_MODEL.id}`)
       try {
         const fallbackResult = await _doNimChat({
@@ -438,6 +450,8 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
           responseFormat,
           maxTokensOverride,
           tools,
+          stream,
+          onChunk,
         })
         if (fallbackResult && fallbackResult.trim().length > 0) {
           return fallbackResult
@@ -457,6 +471,8 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
     responseFormat,
     maxTokensOverride,
     tools,
+    stream,
+    onChunk,
   })
 
   if (retryResult && retryResult.trim().length > 0) {
@@ -473,19 +489,31 @@ interface _DoNimChatOptions {
   responseFormat?: { type: 'json_object' | 'text' }
   maxTokensOverride?: number
   tools?: unknown[]
+  stream?: boolean
+  onChunk?: (text: string) => void
 }
 
 async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
-  const { model, messages, responseFormat, maxTokensOverride, tools } = options
+  const { model, messages, responseFormat, maxTokensOverride, tools, stream, onChunk } = options
 
-  const result = await nimCallWithRetry(async (client) => {
-    const params: Record<string, unknown> = {
-      model: model.id,
-      messages,
-      max_tokens: maxTokensOverride ?? model.maxTokens,
-      temperature: model.temperature ?? 1,
-      top_p: model.topP ?? 1,
-    }
+  const t0 = performance.now()
+  console.log(`[nim] 🚀 Requesting ${model.id} (stream: ${!!stream}, maxTokens: ${maxTokensOverride ?? model.maxTokens})`)
+  
+  let currentMessages = [...messages]
+  let totalContent = ''
+  let resumeCount = 0
+  const MAX_RESUMES = 2
+
+  while (resumeCount <= MAX_RESUMES) {
+    try {
+      const chunkResult = await nimCallWithRetry(async (client) => {
+        const params: Record<string, unknown> = {
+          model: model.id,
+          messages: currentMessages,
+        max_tokens: maxTokensOverride ?? model.maxTokens,
+        temperature: model.temperature ?? 1,
+        top_p: model.topP ?? 1,
+      }
 
     // Model-specific thinking configuration (claude-proxy pattern)
     if (model.thinking) {
@@ -513,11 +541,44 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
     const timeoutId = setTimeout(() => controller.abort(), NIM_REQUEST_TIMEOUT_MS)
 
     try {
-      const res = await client.chat.completions.create({
-        ...params as unknown as ChatCompletionCreateParamsNonStreaming,
-        signal: controller.signal as AbortSignal,
-      } as unknown as ChatCompletionCreateParamsNonStreaming)
-      return res
+      if (stream || onChunk) {
+        const streamRes = await client.chat.completions.create({
+          ...params as any,
+          stream: true,
+          signal: controller.signal as AbortSignal,
+        })
+        let thisChunkContent = ''
+        let finishReason: string | null = null
+        try {
+          for await (const chunk of streamRes) {
+            const content = chunk.choices[0]?.delta?.content || ''
+            if (content) {
+              thisChunkContent += content
+              onChunk?.(content)
+            }
+            if (chunk.choices[0]?.finish_reason) {
+              finishReason = chunk.choices[0].finish_reason
+            }
+          }
+          if (finishReason === 'length' || finishReason === 'max_tokens') {
+            throw new Error('max_tokens_reached')
+          }
+          return thisChunkContent
+        } catch (streamErr) {
+          throw Object.assign(streamErr as Error, { partialContent: thisChunkContent })
+        }
+      } else {
+        const res = await client.chat.completions.create({
+          ...params as any,
+          signal: controller.signal as AbortSignal,
+        })
+        const finishReason = res.choices[0]?.finish_reason
+        const content = res.choices[0]?.message?.content ?? ''
+        if (finishReason === 'length' || finishReason === 'max_tokens') {
+          throw Object.assign(new Error('max_tokens_reached'), { partialContent: content })
+        }
+        return content
+      }
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
         throw Object.assign(new Error(`NIM timeout after ${NIM_REQUEST_TIMEOUT_MS}ms`), { status: 504 })
@@ -528,7 +589,27 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
     }
   })
 
-  return result.choices[0]?.message?.content ?? ''
+      totalContent += chunkResult
+      
+      const duration = ((performance.now() - t0) / 1000).toFixed(2)
+      console.log(`[NIM] Request to ${model.id} completed successfully in ${duration}s.`)
+      return totalContent
+
+    } catch (e) {
+      const partial = (e as any).partialContent as string | undefined
+      if (partial && partial.length > 0 && resumeCount < MAX_RESUMES) {
+        totalContent += partial
+        resumeCount++
+        console.warn(`[nim] ⚠️ Stream interrupted. Resuming from partial content (${totalContent.length} chars) - attempt ${resumeCount}/${MAX_RESUMES}`)
+        currentMessages.push({ role: 'assistant', content: totalContent })
+        currentMessages.push({ role: 'user', content: 'Continue exactly where you left off, do not repeat yourself.' })
+        continue
+      }
+      throw e
+    }
+  }
+
+  throw new Error(`[nim] Failed after ${MAX_RESUMES} resumes`)
 }
 
 /**
@@ -568,6 +649,23 @@ export async function nimChatJSON<T = unknown>(
 // ─── Vision (Kimi K2.6 multimodal) ────────────────────────────────────────────
 
 import axios from 'axios'
+import sharp from 'sharp'
+
+async function compressImageForVision(base64: string): Promise<{ base64: string; mimeType: string }> {
+  try {
+    const buffer = Buffer.from(base64, 'base64')
+    // Resize to max 1024x1024 to dramatically reduce context window size
+    // Use JPEG with high quality (mozjpeg) for visually lossless compression
+    const compressedBuffer = await sharp(buffer)
+      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85, mozjpeg: true })
+      .toBuffer()
+    return { base64: compressedBuffer.toString('base64'), mimeType: 'image/jpeg' }
+  } catch (error) {
+    console.warn('[nimVision] Image compression failed, falling back to original', error)
+    return { base64, mimeType: 'image/png' }
+  }
+}
 
 export interface VisionOptions {
   imageBase64: string
@@ -584,6 +682,9 @@ export interface VisionOptions {
 export async function nimVision(options: VisionOptions): Promise<string> {
   const { imageBase64, prompt, maxTokens = 1024, model = MODELS.OBSERVER_VISUAL.id } = options
 
+  // Compress the image before sending to preserve context window
+  const compressed = await compressImageForVision(imageBase64)
+
   const payload = {
     model,
     messages: [{
@@ -592,7 +693,7 @@ export async function nimVision(options: VisionOptions): Promise<string> {
         { type: 'text', text: prompt },
         {
           type: 'image_url',
-          image_url: { url: `data:image/png;base64,${imageBase64}` },
+          image_url: { url: `data:${compressed.mimeType};base64,${compressed.base64}` },
         },
       ],
     }],

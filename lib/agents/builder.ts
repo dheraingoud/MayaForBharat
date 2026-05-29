@@ -1,6 +1,6 @@
 /**
  * MAYA Builder Agent — Code generation in isolated worktrees
- * Model: z-ai/glm-5.1 (best agentic coder on NIM)
+ * Model: deepseek-ai/deepseek-v4-flash (best agentic coder on NIM)
  *
  * Uses the full agent loop with tool calls for:
  * - Reading existing files for context

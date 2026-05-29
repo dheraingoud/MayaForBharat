@@ -8,8 +8,8 @@ import { Navigation } from '@/components/navigation'
 import { ShaderBackground } from '@/components/shader-background'
 import { AppCard } from '@/components/ui-components'
 import { content } from '@/lib/translations'
-import { motion } from 'framer-motion'
-import { Plus } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Plus, X, AlertTriangle } from 'lucide-react'
 
 interface AppItem {
   id: string
@@ -30,6 +30,8 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false)
   const [apps, setApps] = useState<AppItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [deleteAppId, setDeleteAppId] = useState<string | null>(null)
+  const [deleteInput, setDeleteInput] = useState('')
 
   useEffect(() => {
     setMounted(true)
@@ -77,7 +79,41 @@ export default function Dashboard() {
   }
 
   const handleViewUpdates = () => {
-    router.push('/approval')
+    const appWithUpdates = apps.find(a => a.hasImprovements)
+    if (appWithUpdates) {
+      router.push(`/approval?appId=${appWithUpdates.id}`)
+    } else {
+      router.push('/approval')
+    }
+  }
+
+  const handleDeleteClick = (e: React.MouseEvent, appId: string) => {
+    e.stopPropagation() // Prevent opening the app
+    setDeleteAppId(appId)
+    setDeleteInput('')
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteAppId) return
+    const appToDelete = apps.find(a => a.id === deleteAppId)
+    if (!appToDelete) return
+
+    const expectedName = getAppName(appToDelete)
+    if (deleteInput !== expectedName) {
+      alert('Project name does not match')
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/apps/${deleteAppId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete app')
+      
+      setApps(prev => prev.filter(app => app.id !== deleteAppId))
+      setDeleteAppId(null)
+    } catch (err) {
+      console.error('Delete failed:', err)
+      alert('Failed to delete app')
+    }
   }
 
   // Only show improvements card if there are actual improvements pending
@@ -223,6 +259,7 @@ export default function Dashboard() {
                     status={app.status}
                     updates={app.updates}
                     onOpen={() => handleOpenApp(app.id)}
+                    onDelete={(e) => handleDeleteClick(e, app.id)}
                     language={language}
                   />
                 </motion.div>
@@ -262,6 +299,110 @@ export default function Dashboard() {
           )}
         </main>
       </div>
+
+      {/* Delete Modal */}
+      <AnimatePresence>
+        {deleteAppId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#1A1917]/40 backdrop-blur-sm"
+              onClick={() => setDeleteAppId(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-md bg-white dark:bg-[#2A2925] rounded-3xl p-6 sm:p-8 border border-[#E4E1DA] dark:border-white/10 shadow-2xl"
+            >
+              <button
+                onClick={() => setDeleteAppId(null)}
+                className="absolute top-4 right-4 p-2 text-[#6B6560] dark:text-[#9E9890] hover:text-[#1A1917] dark:hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center text-red-500 flex-shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-[#1A1917] dark:text-white">Delete Project</h3>
+                  <p className="text-sm text-[#6B6560] dark:text-[#9E9890]">This action cannot be undone.</p>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <p className="text-sm text-[#6B6560] dark:text-[#9E9890] mb-4">
+                  This will permanently delete the Vercel deployment, the codebase, and all database records.
+                </p>
+                <label className="block text-sm font-semibold mb-2 text-[#1A1917] dark:text-white">
+                  Type <span className="font-bold text-red-500">{apps.find(a => a.id === deleteAppId) ? getAppName(apps.find(a => a.id === deleteAppId)!) : ''}</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteInput}
+                  onChange={(e) => setDeleteInput(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-[#E4E1DA] dark:border-white/10 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 transition-all"
+                  placeholder="Enter project name"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => setDeleteAppId(null)}
+                  className="px-6 py-3 rounded-full font-semibold text-[#1A1917] dark:text-white border border-[#E4E1DA] dark:border-white/10 hover:bg-[#F5F4F0] dark:hover:bg-white/5 transition-colors w-full"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deleteInput !== (apps.find(a => a.id === deleteAppId) ? getAppName(apps.find(a => a.id === deleteAppId)!) : '')}
+                  className="px-6 py-3 rounded-full font-semibold text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:hover:bg-red-500 transition-colors w-full"
+                >
+                  Yes, Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Top-Right Toast Notification for Updates */}
+      <AnimatePresence>
+        {loading === false && hasPendingImprovements && (
+          <motion.div
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 50 }}
+            className="fixed top-24 right-6 sm:right-8 z-50"
+          >
+            <div
+              className="bg-white dark:bg-[#2A2925] border border-[#E4E1DA] dark:border-[#E8601A]/30 shadow-2xl rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-[#E8601A]/20 transition-all active:scale-[0.98]"
+              onClick={handleViewUpdates}
+            >
+              <div className="relative flex-shrink-0">
+                <div className="absolute inset-0 bg-[#E8601A] rounded-full animate-pulse opacity-40" />
+                <motion.div
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="w-3 h-3 bg-[#E8601A] rounded-full relative z-10"
+                />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#1A1917] dark:text-white">
+                  Update Available
+                </p>
+                <p className="text-xs text-[#6B6560] dark:text-[#9E9890] mt-0.5">
+                  1 update for {getAppName(apps.find(a => a.hasImprovements)!)}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

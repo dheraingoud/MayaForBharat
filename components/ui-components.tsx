@@ -50,6 +50,7 @@ export function AppCard({
   status,
   updates,
   onOpen,
+  onDelete,
   language = 'en',
 }: {
   name: string
@@ -58,6 +59,7 @@ export function AppCard({
   status: 'live' | 'building'
   updates: number
   onOpen: () => void
+  onDelete?: (e: React.MouseEvent) => void
   language?: 'en' | 'hi'
 }) {
   return (
@@ -92,12 +94,25 @@ export function AppCard({
               {updates} {content[language].uiComponents.updates}
             </span>
           </div>
-          <button
-            onClick={onOpen}
-            className="text-[#E8601A] text-xs font-medium hover:underline group-hover:underline"
-          >
-            {content[language].uiComponents.open} →
-          </button>
+          <div className="flex items-center gap-4">
+            {onDelete && (
+              <button
+                onClick={onDelete}
+                className="text-[#6B6560] hover:text-red-500 dark:text-[#9E9890] dark:hover:text-red-400 transition-colors p-1"
+                title="Delete App"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            )}
+            <button
+              onClick={onOpen}
+              className="text-[#E8601A] text-xs font-medium hover:underline group-hover:underline"
+            >
+              {content[language].uiComponents.open} →
+            </button>
+          </div>
         </div>
       </div>
     </motion.div>

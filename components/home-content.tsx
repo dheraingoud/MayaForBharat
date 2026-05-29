@@ -26,32 +26,45 @@ export function HomeContent() {
   const { language } = useLanguage()
   const { theme } = useTheme()
   const router = useRouter()
+  const [hasApps, setHasApps] = useState(false)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-  }, [])
+    fetch('/api/dashboard')
+      .then(r => r.json())
+      .then(d => {
+        if (d.apps && d.apps.length > 0) {
+          setHasApps(true)
+          router.push('/dashboard')
+        }
+      })
+      .catch(() => {})
+  }, [router])
 
   const t = content[language]
 
   if (!mounted) return null
 
   const handleGetStarted = () => {
-    // Always go through sign-in — page handles Clerk config vs missing
-    router.push('/sign-in')
+    if (hasApps) {
+      router.push('/dashboard')
+    } else {
+      router.push('/sign-in')
+    }
   }
 
   return (
-    <div className="relative min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
+    <div className="relative min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden selection:bg-[#E8601A] selection:text-white">
       {/* Shader Background */}
       <ShaderBackground />
 
       {/* Content Layer */}
       <div className="relative z-10">
-        <Navigation />
+        <Navigation hideCta={hasApps} />
 
         {/* Hero Section */}
-        <section className="min-h-[calc(100vh-80px)] flex items-center justify-center px-5 sm:px-8 lg:px-12 py-20">
+        <main className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] px-5 sm:px-8 lg:px-12 py-12 sm:py-20">
           <motion.div
             initial="initial"
             animate="animate"
@@ -108,7 +121,7 @@ export function HomeContent() {
                 whileTap={{ scale: 0.95 }}
                 className="group relative px-8 sm:px-10 py-3 sm:py-4 bg-[#E8601A] hover:bg-[#C94E12] text-white font-semibold rounded-full flex items-center justify-center gap-3 transition-all duration-300 shadow-lg cursor-pointer"
               >
-                <span>{t.hero.cta}</span>
+                <span>{hasApps ? 'Dashboard' : t.hero.cta}</span>
                 <motion.div
                   className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-white/20 flex items-center justify-center"
                   whileHover={{ rotate: -45, scale: 1.1 }}
@@ -142,7 +155,7 @@ export function HomeContent() {
               <div className="text-sm sm:text-base text-[#6B6560] dark:text-[#9E9890]">{t.hero.trust.languages}</div>
             </motion.div>
           </motion.div>
-        </section>
+        </main>
 
         {/* Features Section */}
         <section id="features" className="py-20 sm:py-32 lg:py-40 px-5 sm:px-8 lg:px-12">
@@ -236,7 +249,7 @@ export function HomeContent() {
                 Built for makers. Available globally.
               </p>
               <div className="text-xs sm:text-sm text-[#6B6560] dark:text-[#9E9890]">
-                © 2024 MAYA. All rights reserved.
+                © 2026 MAYA. All rights reserved.
               </div>
             </div>
           </div>

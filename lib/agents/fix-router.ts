@@ -17,7 +17,7 @@ export function assessFixComplexity(
   visualSignals?: VisualSignals
 ): FixComplexity {
   const hasErrors = domSignals.errors.length > 0
-  const hasVisualIssues = visualSignals?.visualIssues?.length ?? 0 > 0
+  const hasVisualIssues = (visualSignals?.visualIssues?.length ?? 0) > 0
 
   if (hasErrors || (hasVisualIssues && (visualSignals?.visualIssues?.length ?? 0) > 2)) {
     return 'complex'

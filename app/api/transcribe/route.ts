@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { transcribeHindi, extractIntent } from '@/lib/voice-pipeline'
 
 export const runtime = 'nodejs'
-export const maxDuration = 30
+export const maxDuration = 120
 
 export async function POST(request: Request) {
   try {

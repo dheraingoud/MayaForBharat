@@ -20,6 +20,8 @@ export interface DeployOptions {
   projectName: string
   directory: string
   memoryDir?: string
+  /** 'production' maps custom domains, 'preview' creates a temporary URL */
+  target?: 'production' | 'preview'
 }
 
 export interface DeployResult {
@@ -65,24 +67,27 @@ async function injectScaffoldFiles(projectDir: string, projectName: string): Pro
         lint: 'next lint'
       },
       dependencies: {
-        'react': '^18',
-        'react-dom': '^18',
-        'next': '15.0.0-rc.0',
+        'react': '^19.0.0',
+        'react-dom': '^19.0.0',
+        'next': '16.2.6',
         'lucide-react': '^0.453.0',
-        'framer-motion': '^11.11.10'
+        'framer-motion': '^11.11.10',
+        'recharts': '^3.0.0',
+        'clsx': '^2.1.1',
+        'tailwind-merge': '^2.5.4'
       },
       devDependencies: {
         'typescript': '^5',
         '@types/node': '^20',
-        '@types/react': '^18',
-        '@types/react-dom': '^18',
+        '@types/react': '^19.0.0',
+        '@types/react-dom': '^19.0.0',
         'postcss': '^8',
-        'tailwindcss': '^3.4.1'
+        'tailwindcss': '^3.4.1',
+        'autoprefixer': '^10.4.20'
       }
     }, null, 2),
     'next.config.js': `/** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true }
 }
 module.exports = nextConfig`,
@@ -99,6 +104,7 @@ export default config`,
     autoprefixer: {},
   },
 }`,
+    '.npmrc': 'legacy-peer-deps=true',
     'tsconfig.json': JSON.stringify({
       compilerOptions: {
         lib: ['dom', 'dom.iterable', 'esnext'],
@@ -166,6 +172,7 @@ export async function deployToVercel({
   projectName,
   directory,
   memoryDir,
+  target = 'production',
 }: DeployOptions): Promise<DeployResult> {
   const token = process.env.DEPLOY_TOKEN
 
@@ -187,16 +194,40 @@ export async function deployToVercel({
 
   const auth = { Authorization: `Bearer ${token}` }
 
-  // ── Step 1: Create or fetch Vercel project ───
   let project: { id: string; name: string }
-  
+
+  const createBody: any = {
+    name: uniqueProjectName,
+    framework: 'nextjs',
+  }
+
+  // Pass along critical environment variables from the host to the Vercel project
+  const envVarsToForward = [
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+    'CLERK_SECRET_KEY',
+    'NEXT_PUBLIC_CLERK_SIGN_IN_URL',
+    'NEXT_PUBLIC_CLERK_SIGN_UP_URL',
+    'NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL',
+    'NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL'
+  ]
+
+  const environmentVariables = envVarsToForward
+    .filter(key => process.env[key])
+    .map(key => ({
+      key,
+      value: process.env[key],
+      type: 'plain',
+      target: ['production', 'preview', 'development']
+    }))
+
+  if (environmentVariables.length > 0) {
+    createBody.environmentVariables = environmentVariables
+  }
+
   const createRes = await fetch(`${VERCEL_API}/v10/projects`, {
     method: 'POST',
     headers: { ...auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: uniqueProjectName,
-      framework: 'nextjs',
-    }),
+    body: JSON.stringify(createBody),
   })
 
   if (!createRes.ok) {
@@ -236,7 +267,6 @@ export async function deployToVercel({
   // ── Step 3: Create deployment ───
   const deployBody = {
     name: uniqueProjectName,
-    projectId: project.id,
     files: fileBlobs,
     gitMetadata: {
       remoteUrl: '',
@@ -244,7 +274,7 @@ export async function deployToVercel({
       commitMessage: `deploy: ${uniqueProjectName}`,
     },
     framework: 'nextjs',
-    target: 'production',
+    target, // 'production' or 'preview'
   }
 
   const deployRes = await fetch(`${VERCEL_API}/v13/deployments`, {
@@ -269,6 +299,55 @@ export async function deployToVercel({
   }
 }
 
+// ── Delete Vercel Project ─────────────────────────────────────────────────────
+
+export async function deleteVercelProject(projectId: string): Promise<boolean> {
+  const token = process.env.DEPLOY_TOKEN
+  if (!token) return true // Mock mode success
+
+  try {
+    const res = await fetch(`${VERCEL_API}/v9/projects/${projectId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    if (!res.ok && res.status !== 404) {
+      console.warn(`[deploy] Failed to delete Vercel project ${projectId}: ${res.status}`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn('[deploy] Error deleting Vercel project:', e)
+    return false
+  }
+}
+
+// ── Delete Vercel Deployment (for cleaning up previews) ───────────────────
+
+export async function deleteVercelDeployment(deploymentUrlOrId: string): Promise<boolean> {
+  const token = process.env.DEPLOY_TOKEN
+  if (!token) return true // Mock mode success
+
+  try {
+    // Extract ID or domain name
+    const id = deploymentUrlOrId.replace('https://', '').split('.')[0]
+    
+    const res = await fetch(`${VERCEL_API}/v13/deployments/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    if (!res.ok) {
+      console.warn(`[deploy] Failed to delete preview ${id}: ${res.status}`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn('[deploy] Error deleting preview:', e)
+    return false
+  }
+}
+
 // ── Helper: collect all text files recursively ─────────────────────────────
 
 async function collectFiles(dir: string): Promise<Map<string, string>> {
@@ -280,11 +359,11 @@ async function collectFiles(dir: string): Promise<Map<string, string>> {
       const full = path.join(current, entry.name)
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name
 
-      // Skip hidden files, node_modules, build outputs
-      if (entry.name.startsWith('.')) continue
+      // Skip node_modules, build outputs, and hidden files (EXCEPT .npmrc)
       if (entry.name === 'node_modules') continue
       if (entry.name === '.next') continue
       if (entry.name === 'dist') continue
+      if (entry.name.startsWith('.') && entry.name !== '.npmrc') continue
 
       if (entry.isDirectory()) {
         await walk(full, rel)

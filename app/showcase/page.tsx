@@ -71,7 +71,7 @@ export default function ShowcasePage() {
         {/* Footer */}
         <footer className="border-t border-[#E4E1DA] dark:border-white/10 py-12 sm:py-16 px-5 sm:px-8 lg:px-12">
           <div className="max-w-6xl mx-auto text-center text-sm text-[#6B6560] dark:text-[#9E9890]">
-            <p>© 2024 MAYA. {t.showcase.allRights}</p>
+            <p>© 2026 MAYA. {t.showcase.allRights}</p>
           </div>
         </footer>
       </div>

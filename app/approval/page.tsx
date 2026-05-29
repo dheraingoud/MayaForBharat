@@ -1,54 +1,83 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useLanguage } from '@/app/providers'
 import { Navigation } from '@/components/navigation'
 import { ShaderBackground } from '@/components/shader-background'
 import { content } from '@/lib/translations'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Check, X, Zap } from 'lucide-react'
+import { ArrowLeft, Check, X, Zap, Loader2 } from 'lucide-react'
 
 export default function ApprovalPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const appId = searchParams.get('appId')
   const { theme } = useTheme()
   const { language } = useLanguage()
   const [mounted, setMounted] = useState(false)
   const [selectedAction, setSelectedAction] = useState<'accept' | 'reject' | null>(null)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const [pendingImprovements, setPendingImprovements] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [appName, setAppName] = useState('App')
+  const [submitting, setSubmitting] = useState(false)
 
   const t = content[language]
 
+  useEffect(() => {
+    setMounted(true)
+    if (appId) {
+      fetch(`/api/evolution-log?appId=${appId}`)
+        .then(r => r.json())
+        .then(d => {
+          setPendingImprovements(d.pendingImprovements || [])
+          setAppName(d.appName || 'App')
+          setLoading(false)
+        })
+        .catch(() => {
+          setLoading(false)
+        })
+    } else {
+      setLoading(false)
+    }
+  }, [appId])
+
   if (!mounted) return null
 
-  const handleAccept = () => {
-    setSelectedAction('accept')
-    setTimeout(() => {
+  const handleAction = async (decision: 'accept' | 'reject') => {
+    if (!appId || pendingImprovements.length === 0 || submitting) return
+    setSelectedAction(decision)
+    setSubmitting(true)
+    
+    try {
+      await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appId,
+          improvementId: pendingImprovements[0].id, // take the first one
+          decision
+        })
+      })
+      
       router.push('/dashboard')
-    }, 600)
+    } catch (e) {
+      console.error(e)
+      setSubmitting(false)
+      setSelectedAction(null)
+    }
   }
 
-  const handleReject = () => {
-    setSelectedAction('reject')
-    setTimeout(() => {
-      router.push('/dashboard')
-    }, 600)
-  }
-
-  // App info from translations
-  const appName = t.apps?.ramKirana?.name || 'Ram Kirana'
-
-  // Changes list from translations
-  const changes = [
-    { title: t.updateItems?.automaticReorder?.feature || 'Faster Store Listing UI', detail: t.updateItems?.automaticReorder?.improvement || '40% less load time' },
-    { title: t.updateItems?.voiceMeasurement?.feature || 'Larger Payment Button', detail: t.updateItems?.voiceMeasurement?.improvement || 'Touch target 44px → 56px' },
-    { title: t.updateItems?.morningReport?.feature || 'Faster Stock Alerts', detail: t.updateItems?.morningReport?.improvement || '5% less delay' },
-    { title: t.updateItems?.automaticReorder?.feature || 'Faster QR Scan', detail: t.updateItems?.morningReport?.improvement || 'Scanner updated' },
-  ]
+  // Changes list from dynamic improvements
+  const changes = pendingImprovements.length > 0 
+    ? pendingImprovements.map(imp => ({
+        title: imp.title,
+        detail: imp.description || imp.category,
+      }))
+    : [
+        { title: 'No pending updates', detail: 'Everything is up to date' }
+      ]
 
   return (
     <div className="relative min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
@@ -186,11 +215,11 @@ export default function ApprovalPage() {
 
               <div className="flex flex-col gap-2 flex-1">
                 <p className="text-sm sm:text-base text-[#1A1917] dark:text-[#F5F4F0] leading-relaxed font-medium">
-                  {t.updateItems?.automaticReorder?.feature + ' • ' + t.updateItems?.voiceMeasurement?.feature}
+                  {changes.map(c => c.title).join(' • ')}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   <span className="px-2.5 py-1 rounded-full bg-[#FDF0E8] dark:bg-[#E8601A]/15 text-[#E8601A] text-xs font-medium border border-[#E8601A]/20">
-                    {t.approval.uiUpdate}
+                    {pendingImprovements.length > 0 ? pendingImprovements[0].category || t.approval.uiUpdate : t.approval.uiUpdate}
                   </span>
                   <span className="px-2.5 py-1 rounded-full bg-[#E8601A]/10 dark:bg-[#E8601A]/20 text-[#E8601A] text-xs font-bold border border-[#E8601A]/30 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A]" />
@@ -240,22 +269,22 @@ export default function ApprovalPage() {
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={handleReject}
-              disabled={selectedAction !== null}
+              onClick={() => handleAction('reject')}
+              disabled={selectedAction !== null || submitting || loading}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl border border-[#E4E1DA] dark:border-white/10 bg-white/50 dark:bg-white/5 hover:bg-white/70 dark:hover:bg-white/10 text-[#1A1917] dark:text-white font-semibold text-sm sm:text-base transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <X className="w-4 h-4 sm:w-5 sm:h-5" />
+              {selectedAction === 'reject' ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <X className="w-4 h-4 sm:w-5 sm:h-5" />}
               {t.approval.reject}
             </motion.button>
 
             <motion.button
               whileHover={{ scale: 1.02, boxShadow: '0 12px 32px rgba(232, 96, 26, 0.3)' }}
               whileTap={{ scale: 0.98 }}
-              onClick={handleAccept}
-              disabled={selectedAction !== null}
+              onClick={() => handleAction('accept')}
+              disabled={selectedAction !== null || submitting || loading}
               className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-[#E8601A] hover:bg-[#C94E12] text-white font-semibold text-sm sm:text-base transition-all duration-300 shadow-lg shadow-[#E8601A]/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Check className="w-4 h-4 sm:w-5 sm:h-5" />
+              {selectedAction === 'accept' ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <Check className="w-4 h-4 sm:w-5 sm:h-5" />}
               {t.approval.accept}
             </motion.button>
           </motion.div>

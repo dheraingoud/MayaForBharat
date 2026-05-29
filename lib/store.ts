@@ -16,6 +16,9 @@ export interface BuiltApp {
   projectId: string
   createdAt: string
   status: 'live' | 'building'
+  adminUsername?: string
+  adminPin?: string
+  shownToOwner?: boolean
   files: Array<{ path: string; content: string }>
 }
 

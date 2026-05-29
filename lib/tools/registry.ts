@@ -366,10 +366,18 @@ export const gitCommitTool = buildTool({
 
 // ─── Tool Collections ─────────────────────────────────────────────────────────
 
+import { takeScreenshotTool, takeSnapshotTool } from './screenshot'
+
 /** All read-only tools (safe for parallel execution) */
 export const READ_TOOLS: MayaTool[] = [readFileTool, listFilesTool, gitDiffTool]
 
-/** All tools for the Builder agent */
+/** Screenshot + snapshot tools for visual observer and Gate 5 */
+export const SCREENSHOT_TOOLS: MayaTool[] = [takeScreenshotTool, takeSnapshotTool]
+
+/** Observer tools — read + snapshot for DOM/visual analysis */
+export const OBSERVER_TOOLS: MayaTool[] = [readFileTool, listFilesTool, takeSnapshotTool, takeScreenshotTool]
+
+/** All tools for the Builder agent (includes screenshot for visual QA) */
 export const BUILDER_TOOLS: MayaTool[] = [
   readFileTool,
   writeFileTool,
@@ -378,6 +386,8 @@ export const BUILDER_TOOLS: MayaTool[] = [
   runTestsTool,
   gitDiffTool,
   gitCommitTool,
+  takeScreenshotTool,
+  takeSnapshotTool,
 ]
 
 /** Verification-only tools */

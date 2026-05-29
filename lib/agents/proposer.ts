@@ -1,6 +1,6 @@
 /**
  * MAYA Proposer Agent — Generates ranked improvement proposals
- * Model: deepseek-ai/deepseek-v4-flash (strong reasoning, fast)
+ * Model: moonshotai/kimi-k2.6 (deep reasoning planner)
  *
  * Takes combined signals from both observers (DOM + Visual).
  * Max 3 proposals per cycle. Category-constrained.
