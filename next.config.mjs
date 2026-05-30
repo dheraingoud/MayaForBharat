@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    // Build-time type checking (CI will handle strict checks separately)
-    ignoreBuildErrors: true,
+    // Strict build-time type checking enabled
+    ignoreBuildErrors: false,
   },
   images: {
     unoptimized: true,

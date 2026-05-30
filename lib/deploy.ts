@@ -22,11 +22,14 @@ export interface DeployOptions {
   memoryDir?: string
   /** 'production' maps custom domains, 'preview' creates a temporary URL */
   target?: 'production' | 'preview'
+  vercelProjectId?: string
 }
 
 export interface DeployResult {
   url: string
   projectId: string
+  success: boolean
+  deploymentId?: string
 }
 
 // ── Helper: inject AGENTS.md + MAYA.md into project root ─────────────────
@@ -54,7 +57,21 @@ async function injectMemoryFiles(
 
 // ── Helper: inject Next.js scaffold files ──────────────────────────────────
 
-async function injectScaffoldFiles(projectDir: string, projectName: string): Promise<void> {
+async function injectScaffoldFiles(projectDir: string, projectName: string, target: 'production' | 'preview' = 'production'): Promise<void> {
+  const STRICT_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
+const nextConfig = {
+  typescript: { ignoreBuildErrors: false },
+  eslint: { ignoreDuringBuilds: false }
+}
+module.exports = nextConfig`
+
+  const PROD_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
+const nextConfig = {
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true }
+}
+module.exports = nextConfig`
+
   const scaffold = {
     'package.json': JSON.stringify({
       name: projectName,
@@ -86,11 +103,7 @@ async function injectScaffoldFiles(projectDir: string, projectName: string): Pro
         'autoprefixer': '^10.4.20'
       }
     }, null, 2),
-    'next.config.js': `/** @type {import('next').NextConfig} */
-const nextConfig = {
-  typescript: { ignoreBuildErrors: true }
-}
-module.exports = nextConfig`,
+    'next.config.js': target === 'preview' ? STRICT_NEXT_CONFIG : PROD_NEXT_CONFIG,
     'tailwind.config.ts': `import type { Config } from 'tailwindcss'
 const config: Config = {
   content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './components/**/*.{js,ts,jsx,tsx,mdx}'],
@@ -173,6 +186,7 @@ export async function deployToVercel({
   directory,
   memoryDir,
   target = 'production',
+  vercelProjectId,
 }: DeployOptions): Promise<DeployResult> {
   const token = process.env.DEPLOY_TOKEN
 
@@ -181,7 +195,7 @@ export async function deployToVercel({
   const uniqueProjectName = `${safeName}-${appId.slice(0, 8)}`
 
   // Inject required scaffold files and memory files
-  await injectScaffoldFiles(directory, uniqueProjectName)
+  await injectScaffoldFiles(directory, uniqueProjectName, target)
   await injectMemoryFiles(directory, memoryDir).catch(() => null)
 
   // ── Demo fallback ───
@@ -189,6 +203,7 @@ export async function deployToVercel({
     return {
       url: `https://maya-app-${appId}.vercel.app`,
       projectId: `demo-${appId}-${Date.now()}`,
+      success: true,
     }
   }
 
@@ -196,57 +211,70 @@ export async function deployToVercel({
 
   let project: { id: string; name: string }
 
-  const createBody: any = {
-    name: uniqueProjectName,
-    framework: 'nextjs',
-  }
-
-  // Pass along critical environment variables from the host to the Vercel project
-  const envVarsToForward = [
-    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
-    'CLERK_SECRET_KEY',
-    'NEXT_PUBLIC_CLERK_SIGN_IN_URL',
-    'NEXT_PUBLIC_CLERK_SIGN_UP_URL',
-    'NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL',
-    'NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL'
-  ]
-
-  const environmentVariables = envVarsToForward
-    .filter(key => process.env[key])
-    .map(key => ({
-      key,
-      value: process.env[key],
-      type: 'plain',
-      target: ['production', 'preview', 'development']
-    }))
-
-  if (environmentVariables.length > 0) {
-    createBody.environmentVariables = environmentVariables
-  }
-
-  const createRes = await fetch(`${VERCEL_API}/v10/projects`, {
-    method: 'POST',
-    headers: { ...auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify(createBody),
-  })
-
-  if (!createRes.ok) {
-    // If it already exists, just fetch it
-    if (createRes.status === 409) {
-      const getRes = await fetch(`${VERCEL_API}/v9/projects/${uniqueProjectName}`, {
-        headers: auth,
-      })
-      if (!getRes.ok) {
-        const err = await getRes.text()
-        throw new Error(`Vercel project fetch failed: ${getRes.status} ${err}`)
-      }
-      project = await getRes.json()
-    } else {
-      const err = await createRes.text()
-      throw new Error(`Vercel project create failed: ${createRes.status} ${err}`)
+  if (vercelProjectId) {
+    // If we already have a vercelProjectId, just fetch the existing project
+    const getRes = await fetch(`${VERCEL_API}/v9/projects/${vercelProjectId}`, {
+      headers: auth,
+    })
+    if (!getRes.ok) {
+      const err = await getRes.text()
+      throw new Error(`Vercel project fetch by ID failed: ${getRes.status} ${err}`)
     }
+    project = await getRes.json()
   } else {
-    project = await createRes.json()
+    // Project doesn't exist yet, create it
+    const createBody: any = {
+      name: uniqueProjectName,
+      framework: 'nextjs',
+    }
+
+    // Pass along critical environment variables from the host to the Vercel project
+    const envVarsToForward = [
+      'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+      'CLERK_SECRET_KEY',
+      'NEXT_PUBLIC_CLERK_SIGN_IN_URL',
+      'NEXT_PUBLIC_CLERK_SIGN_UP_URL',
+      'NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL',
+      'NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL'
+    ]
+
+    const environmentVariables = envVarsToForward
+      .filter(key => process.env[key])
+      .map(key => ({
+        key,
+        value: process.env[key],
+        type: 'plain',
+        target: ['production', 'preview', 'development']
+      }))
+
+    if (environmentVariables.length > 0) {
+      createBody.environmentVariables = environmentVariables
+    }
+
+    const createRes = await fetch(`${VERCEL_API}/v10/projects`, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify(createBody),
+    })
+
+    if (!createRes.ok) {
+      // If it already exists by name, just fetch it
+      if (createRes.status === 409) {
+        const getRes = await fetch(`${VERCEL_API}/v9/projects/${uniqueProjectName}`, {
+          headers: auth,
+        })
+        if (!getRes.ok) {
+          const err = await getRes.text()
+          throw new Error(`Vercel project fetch failed: ${getRes.status} ${err}`)
+        }
+        project = await getRes.json()
+      } else {
+        const err = await createRes.text()
+        throw new Error(`Vercel project create failed: ${createRes.status} ${err}`)
+      }
+    } else {
+      project = await createRes.json()
+    }
   }
 
   // ── Step 2: Upload files -> get source files array ──
@@ -293,9 +321,82 @@ export async function deployToVercel({
     id?: string
   }
 
+  // If this is a preview deploy, poll for success. If it fails, return false success
+  if (target === 'preview' && deployJson.id) {
+    const buildSuccess = await pollDeployment(deployJson.id, token)
+    if (!buildSuccess) {
+      return {
+        url: `https://${deployJson.url || `${uniqueProjectName}.vercel.app`}`,
+        projectId: project.id,
+        success: false,
+        deploymentId: deployJson.id,
+      }
+    }
+  }
+
   return {
     url: `https://${deployJson.url || `${uniqueProjectName}.vercel.app`}`,
     projectId: project.id,
+    success: true,
+    deploymentId: deployJson.id,
+  }
+}
+
+// ── Poll Vercel Deployment ───────────────────────────────────────────────────
+
+export async function pollDeployment(deploymentId: string, token: string): Promise<boolean> {
+  let attempts = 0
+  while (attempts < 60) { // Max 2 minutes (2s interval)
+    await new Promise(r => setTimeout(r, 2000))
+    const res = await fetch(`${VERCEL_API}/v13/deployments/${deploymentId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    
+    if (!res.ok) continue
+    
+    const data = await res.json()
+    if (data.readyState === 'READY') return true
+    if (data.readyState === 'ERROR' || data.readyState === 'CANCELED') return false
+    
+    attempts++
+  }
+  return false
+}
+
+// ── Fetch Vercel Deployment Logs ─────────────────────────────────────────────
+
+export async function getDeploymentLogs(deploymentId: string, token: string): Promise<string> {
+  try {
+    const res = await fetch(`${VERCEL_API}/v2/deployments/${deploymentId}/events`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    
+    if (!res.ok) return 'Failed to fetch logs from Vercel.'
+    
+    const text = await res.text()
+    const logs: string[] = []
+    const lines = text.split('\n')
+    
+    for (const line of lines) {
+      const trimmed = line.trim()
+      let data: any = null
+      
+      if (trimmed.startsWith('data: ')) {
+        try { data = JSON.parse(trimmed.slice(6)) } catch (e) {}
+      } else if (trimmed.startsWith('{')) {
+        try { data = JSON.parse(trimmed) } catch (e) {}
+      }
+      
+      if (data && (data.type === 'stdout' || data.type === 'stderr' || data.type === 'command')) {
+        const payloadText = data.payload?.text || data.payload?.message || ''
+        if (payloadText) logs.push(payloadText)
+      }
+    }
+    
+    return logs.join('')
+  } catch (e) {
+    console.error('[deploy] Error fetching deployment logs:', e)
+    return 'Error fetching logs.'
   }
 }
 

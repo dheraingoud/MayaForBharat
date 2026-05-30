@@ -12,6 +12,12 @@ import { api } from "@/convex/_generated/api"
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL || "https://example.check.convex.cloud"
 const convex = new ConvexHttpClient(convexUrl)
 
+export interface AppMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+}
+
 export interface BuiltApp {
   id: string
   name: string
@@ -25,6 +31,7 @@ export interface BuiltApp {
   adminUsername?: string
   adminPin?: string
   shownToOwner?: boolean
+  messages?: AppMessage[]
   files: Array<{ path: string; content: string }>
 }
 
@@ -46,6 +53,7 @@ function mapFromConvex(doc: any): BuiltApp {
     adminUsername: doc.adminUsername,
     adminPin: doc.adminPin,
     shownToOwner: doc.shownToOwner,
+    messages: doc.messages || [],
     files: [],
   }
 }
@@ -97,6 +105,17 @@ export async function removeApp(id: string): Promise<void> {
     await convex.mutation(api.apps.removeByAppId, { appId: id })
   } catch (e) {
     console.error("Error removing app from Convex:", e)
+  }
+}
+
+export async function updateAppMessages(id: string, messages: AppMessage[]): Promise<void> {
+  try {
+    const doc = await convex.query(api.apps.getByAppId, { appId: id })
+    if (doc) {
+      await convex.mutation(api.apps.update, { id: doc._id, messages })
+    }
+  } catch (e) {
+    console.error("Error updating app messages in Convex:", e)
   }
 }
 

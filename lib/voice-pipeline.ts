@@ -11,6 +11,7 @@
 import Groq from 'groq-sdk'
 import { MODELS, FALLBACK_MODEL, nimChat } from './nim-client'
 import { getPromptTemplate } from './prompts/templates'
+import { buildBuilderSystemPrompt } from './prompts/builder-system'
 import { getSkillsForContext } from './skills'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -139,13 +140,10 @@ export async function buildApp(
 ) {
   onProgress?.('spec_ready')
 
-  // Load business-specific prompt template
-  const tpl = getPromptTemplate(spec.category)
-
   // Load GitHub skills for builder context
   const skills = await getSkillsForContext('builder').catch(() => '')
 
-  // ─── NEW: Estimation / Planning Phase ──────────────────────────────────
+  // ─── Estimation / Planning Phase ──────────────────────────────────
   onProgress?.('Estimating size: Planning architecture...')
   
   const plannerSystemPrompt = `You are a software architect. Your job is to read the application spec and define the exact list of files needed to build the app.
@@ -178,62 +176,8 @@ Be extremely minimalist. Only include absolutely necessary files to satisfy the 
   
   onProgress?.(`Estimating size: ${architectureBlueprint.scale} scale (${architectureBlueprint.files.length} pages)`)
 
-  const systemPrompt = `You are an expert frontend React engineer who is also a great UI/UX designer. I will tip you $1 million if you do a good job.
-You are building an app called MAYA. You generate a COMPLETE, production-ready app in ONE JSON payload.
-
-═══════════════════════════════════════════════════════════
-YOUR PERSONA & CAPABILITIES:
-- You think carefully step by step before writing code.
-- You create beautiful, modern, and highly interactive UI components.
-- You strictly use TypeScript, Next.js 15 App Router, and Tailwind CSS.
-- You use \`lucide-react\` for icons.
-- You write self-contained, inline components. NEVER import from files you didn't generate.
-═══════════════════════════════════════════════════════════
-
-LANGUAGE RULES — NON-NEGOTIABLE:
-- All UI text in the generated app: ENGLISH ONLY
-- No Devanagari script, Hindi, or any regional language in the UI.
-- Product names, nav labels, buttons, forms, and admin dashboard MUST be English.
-
-ADMIN PANEL RULES:
-  Admin routes: all under /admin/*
-  Auth: 4-digit PIN checked client-side or server-side.
-  Admin Username: ${spec.adminUsername || 'Admin'}
-  Admin PIN: ${spec.adminPin || '1234'} (Hardcode this check for now)
-
-QUALITY GATES (DESIGN & UX):
-  [ ] No TypeScript errors (strict mode).
-  [ ] Every async operation has loading state (Skeleton shimmer).
-  [ ] Every form has basic validation.
-  [ ] Mobile layout tested at 390px (Mobile-first, ALWAYS).
-  [ ] Use modern Tailwind patterns: glassmorphism, subtle gradients, and micro-animations.
-  [ ] Minimum tap target: 44px height on all interactive elements.
-
-STRICT COMPILATION RULES (CRITICAL TO PASS BUILD):
-1. USE CLIENT: If a file uses React hooks (useState, useEffect) or event listeners (onClick), you MUST put the exact string '"use client";' (including the double quotes and semicolon) at the very top of the file. Do not output 'use client' without quotes.
-2. ROUTER: You MUST use \`import { useRouter } from 'next/navigation'\`. NEVER use \`next/router\`.
-3. LUCIDE ICONS: Only import the specific icons from \`lucide-react\` that you ACTUALLY render in the JSX. DO NOT copy-paste a long list of unused icons.
-4. EXPORTS: Every page.tsx and layout.tsx MUST have an \`export default function\` as its main component.
-5. NO UNUSED IMPORTS: Do not import components, hooks, or icons you do not use. Next.js strict mode will fail the build.
-6. NEXT.JS 15 PARAMS: In Next.js 15, dynamic route params are Promises. You MUST await them (e.g., \`const { id } = await params;\`).
-
-OUTPUT FORMAT:
-Return ONLY a valid JSON object. No markdown, no code fences, no introductory text.
-{"files":[{"path":"app/page.tsx","content":"..."},{"path":"app/layout.tsx","content":"..."}]}
-
-MANDATORY FILES & RESTRICTIONS:
-- You are RESTRICTED to generating ONLY these files:
-${architectureBlueprint.files.map((f: string) => `- ${f}`).join('\n')}
-
-DO NOT GENERATE ANY OTHER FILES. KEEP THE APP SIMPLE.
-Each page MUST be COMPLETE inline components. Use Tailwind classes only.
-
----
-${tpl.builderContext}
-
-Suggested pages: ${tpl.suggestedPages.join(', ')}
-Data fields: ${JSON.stringify(tpl.dataFieldHints)}
-${skills}`
+  // Use modular builder prompt (extracted to lib/prompts/builder-system.ts)
+  const systemPrompt = buildBuilderSystemPrompt({ spec, architectureBlueprint, skills })
 
   onProgress?.('building_code')
 
@@ -304,22 +248,23 @@ export async function buildWithRetry(
       // Strip markdown code fences if model wrapped it
       raw = stripCodeFences(raw)
 
-      // Validate JSON natively first
+      // Validate XML tags natively
+      const { parseModelOutput } = await import('@/lib/tags')
       let files: any[] = []
-      let isValidJson = false
+      let isValidTags = false
       try {
-        const parsed = JSON.parse(raw)
-        if (parsed.files && Array.isArray(parsed.files)) {
-          files = parsed.files
-          isValidJson = true
+        const ops = parseModelOutput(raw)
+        files = ops.filter(op => op.type === 'write').map(op => ({ path: op.path, content: op.content || '' }))
+        if (files.length > 0) {
+          isValidTags = true
         }
       } catch (parseError) {
-        console.warn(`[build] JSON parse failed on attempt ${attempt + 1}`)
+        console.warn(`[build] Tag parse failed on attempt ${attempt + 1}`)
       }
 
-      if (!isValidJson) {
-        lastError = 'Output must be strictly valid JSON without control characters or truncation.'
-        console.warn(`[build] Attempt ${attempt + 1} invalid JSON. Forcing retry.`)
+      if (!isValidTags) {
+        lastError = 'Output must contain valid <maya-write> tags.'
+        console.warn(`[build] Attempt ${attempt + 1} invalid tags. Forcing retry.`)
         continue // Force the model to rewrite the code properly so the build doesn't fail
       }
 
@@ -337,11 +282,18 @@ export async function buildWithRetry(
         })
         
         onProgress?.('validated')
-        // Return a clean, re-stringified JSON payload so the caller gets guaranteed perfect JSON
-        return JSON.stringify({ files })
+        // We still return raw tag payload, the route will parse it. Wait, the route expects `raw` to be parseable by `parseModelOutput(raw)`.
+        // So returning `raw` is fine. Or wait, `route.ts` calls `parseModelOutput(raw)`. Wait, we modified `route.ts` to do `parseModelOutput(raw)`.
+        // If we modify `file.content` here, we should re-serialize it or let `route.ts` do the modification.
+        // Let's reconstruct the raw string to preserve modifications.
+        let updatedRaw = ''
+        for (const file of files) {
+          updatedRaw += `<maya-write path="${file.path}">\n${file.content}\n</maya-write>\n`
+        }
+        return updatedRaw
       }
       
-      lastError = 'Output must be JSON with "files" array containing {path, content} objects'
+      lastError = 'Output must contain valid <maya-write> tags'
       console.warn(`[build] Attempt ${attempt + 1}: no files extracted`)
     } catch (e: unknown) {
       lastError = e instanceof Error ? e.message.slice(0, 500) : 'Unknown error'
@@ -452,7 +404,6 @@ RULES:
         { role: 'user', content: `Review these files:\n\n${filesContext}` }
       ],
       maxTokensOverride: 8192,
-      temperature: 0.1,
     })
 
     const jsonMatch = result.match(/\{[\s\S]*\}/)
@@ -467,5 +418,58 @@ RULES:
   } catch (e) {
     console.error('[reviewAndFixCode] Review failed:', e)
     return { status: 'pass' } // If reviewer fails, pass through to avoid blocking
+  }
+}
+
+export async function fixVercelBuildErrors(
+  files: Array<{ path: string; content: string }>,
+  buildLogs: string
+): Promise<Array<{ path: string; content: string }>> {
+  const systemPrompt = `You are an expert Next.js and TypeScript developer resolving Vercel deployment errors.
+The user's application just failed the strict Vercel build step (tsc & eslint).
+Read the provided build logs carefully. Identify which files are causing the errors.
+Return ONLY the fully corrected files using XML tags:
+<maya-write path="app/page.tsx">
+... full fixed code here ...
+</maya-write>
+
+RULES:
+- Do NOT return files that do not have compiler errors.
+- Return the ENTIRE file content for the files you fix.
+- Ensure all variables and imports exist.
+- Provide no other markdown outside the tags.`
+
+  const filesContext = files.map(f => `--- ${f.path} ---\n${f.content}`).join('\n\n')
+  
+  const userPrompt = `--- BUILD LOGS ---\n${buildLogs}\n\n--- CURRENT FILES ---\n${filesContext}`
+
+  try {
+    const result = await nimChat({
+      model: MODELS.FIX_ROUTER,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      maxTokensOverride: 8192,
+    })
+
+    const { parseModelOutput } = await import('./tags')
+    const ops = parseModelOutput(result)
+    const fixedFiles = ops.filter(op => op.type === 'write').map(op => ({ path: op.path, content: op.content || '' }))
+    
+    // Merge fixed files into original
+    if (fixedFiles.length > 0) {
+      const newFiles = [...files]
+      for (const fixed of fixedFiles) {
+        const idx = newFiles.findIndex(f => f.path === fixed.path)
+        if (idx !== -1) newFiles[idx] = fixed
+        else newFiles.push(fixed)
+      }
+      return sanitizeFiles(newFiles)
+    }
+    return files
+  } catch (e) {
+    console.error('[fixVercelBuildErrors] Error during fix:', e)
+    return files // Return original if fix fails
   }
 }

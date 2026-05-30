@@ -358,6 +358,10 @@ export default function RecordPage() {
             english: data.english,
             spec: data.spec,
           })
+          
+          // Auto-continue to builder
+          localStorage.setItem('maya-app-spec', JSON.stringify(data.spec))
+          router.push('/builder')
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e)
           console.error('[record]', msg)

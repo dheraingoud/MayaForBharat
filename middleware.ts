@@ -30,19 +30,7 @@ export default hasClerkKey
       }
     })
   : (req: Request) => {
-      // Clerk not configured — block non-public routes so they go to sign-in page
-      const url = new URL(req.url)
-      const path = url.pathname
-      const isPublic =
-        path === '/' ||
-        path.startsWith('/sign-in') ||
-        path.startsWith('/sign-up') ||
-        path.startsWith('/api') ||
-        path.startsWith('/_next') ||
-        path === '/favicon.ico'
-      if (!isPublic && path !== '/sign-in' && path !== '/sign-up') {
-        return NextResponse.redirect(new URL('/sign-in', url))
-      }
+      // Clerk not configured — allow testing mode
       return NextResponse.next()
     }
 

@@ -15,7 +15,7 @@ async function testNim() {
     });
     console.log('NIM SUCCESS', res.choices[0].message.content);
   } catch (e) {
-    console.error('NIM ERROR:', e.message);
+    console.error('NIM ERROR:', (e as any).message);
   }
 }
 
@@ -29,7 +29,7 @@ async function testGroq() {
     const res = await openai.models.retrieve('whisper-large-v3-turbo');
     console.log('GROQ SUCCESS', res.id);
   } catch (e) {
-    console.error('GROQ ERROR:', e.message);
+    console.error('GROQ ERROR:', (e as any).message);
   }
 }
 

@@ -64,6 +64,15 @@ export const create = mutation({
     adminUsername: v.optional(v.string()),
     adminPin: v.optional(v.string()),
     shownToOwner: v.optional(v.boolean()),
+    messages: v.optional(
+      v.array(
+        v.object({
+          role: v.union(v.literal("user"), v.literal("assistant")),
+          content: v.string(),
+          timestamp: v.number(),
+        })
+      )
+    ),
     status: v.optional(v.union(
       v.literal("building"),
       v.literal("live"),
@@ -104,6 +113,15 @@ export const update = mutation({
     evolutionCount: v.optional(v.number()),
     lastEvolvedAt: v.optional(v.number()),
     shownToOwner: v.optional(v.boolean()),
+    messages: v.optional(
+      v.array(
+        v.object({
+          role: v.union(v.literal("user"), v.literal("assistant")),
+          content: v.string(),
+          timestamp: v.number(),
+        })
+      )
+    ),
   },
   handler: async (ctx, args) => {
     const updates: Record<string, any> = {}
@@ -112,6 +130,7 @@ export const update = mutation({
     if (args.evolutionCount !== undefined) updates.evolutionCount = args.evolutionCount
     if (args.lastEvolvedAt) updates.lastEvolvedAt = args.lastEvolvedAt
     if (args.shownToOwner !== undefined) updates.shownToOwner = args.shownToOwner
+    if (args.messages !== undefined) updates.messages = args.messages
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(args.id, updates)
     }

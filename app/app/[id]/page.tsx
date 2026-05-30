@@ -5,8 +5,15 @@ import { useParams, useRouter } from 'next/navigation'
 import { Navigation } from '@/components/navigation'
 import { ShaderBackground } from '@/components/shader-background'
 import { useLanguage } from '@/app/providers'
-import { motion } from 'framer-motion'
-import { ExternalLink, Edit3, RefreshCw, ArrowLeft, Globe, Zap, Clock, TrendingUp } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ExternalLink, RefreshCw, Loader2, ArrowLeft } from 'lucide-react'
+import { AppChat } from '@/components/app-chat'
+
+interface AppMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+}
 
 interface AppData {
   id: string
@@ -17,10 +24,11 @@ interface AppData {
   url: string
   projectId: string
   createdAt: string
-  status: 'live' | 'building'
+  status: 'live' | 'building' | 'evolving'
   adminUsername?: string
   adminPin?: string
   shownToOwner?: boolean
+  messages?: AppMessage[]
 }
 
 export default function AppDetailPage() {
@@ -32,285 +40,203 @@ export default function AppDetailPage() {
   const [mounted, setMounted] = useState(false)
   const [app, setApp] = useState<AppData | null>(null)
   const [loading, setLoading] = useState(true)
+  
+  // Iframe states
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null)
   const [iframeLoaded, setIframeLoaded] = useState(false)
+  const [isDeploying, setIsDeploying] = useState(true)
 
   useEffect(() => {
     setMounted(true)
-    // Load app data from the store
-    fetch('/api/dashboard')
-      .then(r => r.json())
-      .then(data => {
-        const found = data.apps?.find((a: { id: string }) => a.id === appId)
-        if (found) {
-            setApp({
-              id: found.id,
-              name: found.nameKey || found.name,
-              nameHindi: found.nameHindi,
-              descriptionEn: found.descriptionEn,
-              category: found.typeKey || found.category,
-              url: found.url || '',
-              projectId: found.projectId || '',
-              createdAt: found.createdAt || new Date().toISOString(),
-              status: found.status || 'live',
-              adminUsername: found.adminUsername,
-              adminPin: found.adminPin,
-              shownToOwner: found.shownToOwner,
-            })
-            
-            // If shownToOwner is false, flip it to true after 2 seconds
-            if (found.adminPin && !found.shownToOwner) {
-              setTimeout(() => {
-                fetch(`/api/apps/${found.id}`, { method: 'PATCH' }).catch(console.error)
-              }, 2000)
-            }
-          }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    fetchApp()
   }, [appId])
+
+  const fetchApp = async () => {
+    try {
+      const r = await fetch('/api/dashboard')
+      const data = await r.json()
+      const found = data.apps?.find((a: { id: string }) => a.id === appId)
+      if (found) {
+        setApp({
+          id: found.id,
+          name: found.nameKey || found.name,
+          nameHindi: found.nameHindi,
+          descriptionEn: found.descriptionEn,
+          category: found.typeKey || found.category,
+          url: found.url || '',
+          projectId: found.projectId || '',
+          createdAt: found.createdAt || new Date().toISOString(),
+          status: found.status || 'live',
+          adminUsername: found.adminUsername,
+          adminPin: found.adminPin,
+          shownToOwner: found.shownToOwner,
+          messages: found.messages || [],
+        })
+        
+        // Start polling the Vercel URL
+        if (found.url) {
+          checkVercelUrl(found.url)
+        }
+
+        if (found.adminPin && !found.shownToOwner) {
+          setTimeout(() => {
+            fetch(`/api/apps/${found.id}`, { method: 'PATCH' }).catch(console.error)
+          }, 2000)
+        }
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Poll the production URL to see if it's returning 200 OK
+  const checkVercelUrl = async (url: string) => {
+    setIsDeploying(true)
+    let attempts = 0
+    const maxAttempts = 60 // 2 minutes (2s intervals)
+    
+    const check = async () => {
+      try {
+        const res = await fetch(url, { method: 'HEAD', mode: 'no-cors' })
+        // If we get here without a network error, it's highly likely it's live
+        // Since no-cors hides the status, we assume it's live if it resolves quickly
+        // A better approach is fetching our own proxy or just relying on it resolving.
+        // Actually, we can fetch the home page HTML via a proxy route if needed, 
+        // but simple resolution usually means Vercel routed it.
+        setIsDeploying(false)
+        setIframeUrl(url)
+        return true
+      } catch (e) {
+        return false
+      }
+    }
+
+    // Try once immediately
+    if (await check()) return
+
+    const interval = setInterval(async () => {
+      attempts++
+      if (await check() || attempts >= maxAttempts) {
+        clearInterval(interval)
+        setIsDeploying(false)
+        setIframeUrl(url) // Give up and just show it
+      }
+    }, 2000)
+  }
 
   if (!mounted) return null
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#E8601A]" />
+      </div>
+    )
+  }
+
+  if (!app) {
+    return (
+      <div className="min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] flex flex-col items-center justify-center text-center px-4">
+        <div className="text-5xl mb-4">🔍</div>
+        <h2 className="text-xl font-bold mb-2 text-[#1A1917] dark:text-[#F5F4F0]">
+          {language === 'hi' ? 'ऐप नहीं मिला' : 'App Not Found'}
+        </h2>
+        <button onClick={() => router.push('/dashboard')} className="mt-4 text-[#E8601A] hover:underline">
+          Go back to dashboard
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="relative min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
-      <ShaderBackground />
+    <div className="h-screen w-screen bg-[#F5F4F0] dark:bg-[#1A1917] flex overflow-hidden text-[#1A1917] dark:text-[#F5F4F0]">
+      {/* Background */}
+      <div className="absolute inset-0 z-0 pointer-events-none opacity-50">
+        <ShaderBackground />
+      </div>
 
-      <div className="relative z-10">
-        <Navigation />
+      {/* Floating Top-Left Nav */}
+      <div className="absolute top-4 left-4 z-50">
+        <Navigation position="top-left" />
+      </div>
 
-        <main className="max-w-7xl mx-auto px-5 sm:px-8 lg:px-12 py-8 sm:py-12">
-          {/* Back Button */}
-          <motion.button
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-2 text-sm text-[#6B6560] dark:text-[#9E9890] hover:text-[#E8601A] transition-colors mb-6"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            {language === 'hi' ? 'डैशबोर्ड' : 'Dashboard'}
-          </motion.button>
-
-          {loading ? (
-            <div className="flex items-center justify-center min-h-[400px]">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E8601A]" />
-            </div>
-          ) : !app ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex items-center justify-center min-h-[400px]"
-            >
-              <div className="text-center">
-                <div className="text-5xl mb-4">🔍</div>
-                <h2 className="text-xl font-bold mb-2">
-                  {language === 'hi' ? 'ऐप नहीं मिला' : 'App Not Found'}
-                </h2>
-                <p className="text-sm text-[#6B6560] dark:text-[#9E9890]">
-                  {language === 'hi' ? 'यह ऐप मौजूद नहीं है' : 'This app does not exist'}
-                </p>
+      {/* Main Layout */}
+      <div className="flex w-full h-full z-10 p-2 gap-2">
+        
+        {/* Left Panel: Chat Interface (30% width) */}
+        <div className="w-[30%] min-w-[300px] max-w-[400px] flex flex-col h-full bg-white/80 dark:bg-[#2A2925]/80 backdrop-blur-xl border border-[#E4E1DA] dark:border-white/10 rounded-2xl shadow-xl overflow-hidden relative pt-[52px]">
+          
+          <div className="px-4 py-3 border-b border-[#E4E1DA] dark:border-white/10 flex items-center justify-between">
+            <div>
+              <h2 className="font-bold text-sm" style={{ fontFamily: 'var(--font-sora)' }}>
+                {language === 'hi' && app.nameHindi ? app.nameHindi : app.name}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                <div className={`w-1.5 h-1.5 rounded-full ${app.status === 'live' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
+                <span className="text-[10px] text-[#6B6560] dark:text-[#9E9890] capitalize">
+                  {app.status === 'live' ? (language === 'hi' ? 'लाइव' : 'Live') : (language === 'hi' ? 'बिल्ड हो रहा है' : 'Building/Evolving')}
+                </span>
               </div>
-            </motion.div>
-          ) : (
-            <div className="grid lg:grid-cols-3 gap-6">
-              {/* App Info Panel */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="lg:col-span-1 space-y-4"
-              >
-                {/* Status Card */}
-                <div className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-12 h-12 bg-[#FDF0E8] dark:bg-[#E8601A]/20 rounded-2xl flex items-center justify-center">
-                      <Globe className="w-6 h-6 text-[#E8601A]" />
-                    </div>
-                    <div>
-                      <h1 className="text-xl font-bold" style={{ fontFamily: 'var(--font-sora)' }}>
-                        {language === 'hi' && app.nameHindi ? app.nameHindi : app.name}
-                      </h1>
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${app.status === 'live' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
-                        <span className="text-xs text-[#6B6560] dark:text-[#9E9890] capitalize">{app.status}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {app.descriptionEn && (
-                    <p className="text-sm text-[#6B6560] dark:text-[#9E9890] mb-4">{app.descriptionEn}</p>
-                  )}
-
-                  <div className="flex items-center gap-2 text-xs text-[#9E9890]">
-                    <Clock className="w-3 h-3" />
-                    <span>{new Date(app.createdAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-6 space-y-3">
-                  <h3 className="text-sm font-semibold text-[#6B6560] dark:text-[#9E9890] uppercase tracking-wider mb-3">
-                    {language === 'hi' ? 'क्रियाएँ' : 'Actions'}
-                  </h3>
-
-                  {app.url && (
-                    <motion.a
-                      href={app.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="flex items-center gap-3 w-full px-4 py-3 bg-[#E8601A] hover:bg-[#C94E12] text-white rounded-2xl font-semibold text-sm transition-colors"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      {language === 'hi' ? 'ऐप खोलें' : 'Open Live App'}
-                    </motion.a>
-                  )}
-
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => router.push(`/app/${appId}/edit`)}
-                    className="flex items-center gap-3 w-full px-4 py-3 border border-[#E4E1DA] dark:border-white/10 rounded-2xl font-semibold text-sm hover:bg-[#F5F4F0] dark:hover:bg-white/5 transition-colors"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    {language === 'hi' ? 'बातचीत से संपादित करें' : 'Edit via Chat'}
-                  </motion.button>
-
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => {
-                      fetch('/api/evolution', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          appId: app.id,
-                          name: app.name,
-                          description: app.descriptionEn || '',
-                          vercelUrl: app.url,
-                        }),
-                      })
-                    }}
-                    className="flex items-center gap-3 w-full px-4 py-3 border border-[#E4E1DA] dark:border-white/10 rounded-2xl font-semibold text-sm hover:bg-[#F5F4F0] dark:hover:bg-white/5 transition-colors"
-                  >
-                    <Zap className="w-4 h-4 text-[#E8601A]" />
-                    {language === 'hi' ? 'विकास चक्र चलाएं' : 'Run Evolution Cycle'}
-                  </motion.button>
-
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => router.push(`/app/${appId}/evolution`)}
-                    className="flex items-center gap-3 w-full px-4 py-3 border border-[#E4E1DA] dark:border-white/10 rounded-2xl font-semibold text-sm hover:bg-[#F5F4F0] dark:hover:bg-white/5 transition-colors"
-                  >
-                    <TrendingUp className="w-4 h-4 text-[#2D7A4F]" />
-                    {language === 'hi' ? 'विकास लॉग देखें' : 'View Evolution Log'}
-                  </motion.button>
-                </div>
-
-                {/* Admin Access Card */}
-                {app.adminUsername && (
-                  <div className="bg-[#FFF8F5] dark:bg-[#2A231F] rounded-3xl border border-[#FADCD0] dark:border-[#E8601A]/30 p-6 space-y-4">
-                    <h3 className="text-sm font-semibold text-[#E8601A] uppercase tracking-wider mb-2 flex items-center gap-2">
-                      <span>🔑</span> {language === 'hi' ? 'व्यवस्थापक पहुँच' : 'Admin Access'}
-                    </h3>
-                    <p className="text-xs text-[#6B6560] dark:text-[#9E9890] leading-relaxed">
-                      {language === 'hi' 
-                        ? 'आपका एडमिन पैनल /admin पर है। अपने क्रेडेंशियल्स सेव करें।' 
-                        : 'Your admin panel is at /admin. Save your credentials.'}
-                    </p>
-                    
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center bg-white dark:bg-[#1A1917] px-4 py-3 rounded-xl border border-[#FADCD0] dark:border-[#E8601A]/20">
-                        <span className="text-xs font-semibold text-[#6B6560] dark:text-[#9E9890]">Username</span>
-                        <span className="text-sm font-bold text-[#1A1917] dark:text-white font-mono">{app.adminUsername}</span>
-                      </div>
-                      <div className="flex justify-between items-center bg-white dark:bg-[#1A1917] px-4 py-3 rounded-xl border border-[#FADCD0] dark:border-[#E8601A]/20">
-                        <span className="text-xs font-semibold text-[#6B6560] dark:text-[#9E9890]">PIN</span>
-                        <span className="text-sm font-bold text-[#E8601A] font-mono tracking-widest">
-                          {app.shownToOwner ? '****' : app.adminPin}
-                        </span>
-                      </div>
-                    </div>
-
-                    {!app.shownToOwner && (
-                      <p className="text-[10px] text-red-500 font-semibold mt-2 text-center">
-                        {language === 'hi' ? 'यह पिन दोबारा नहीं दिखाया जाएगा' : '⚠ Save this. It won\'t be shown again.'}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </motion.div>
-
-              {/* Live Preview iframe */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-                className="lg:col-span-2"
-              >
-                <div className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 overflow-hidden">
-                  {/* Browser chrome */}
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-[#E4E1DA] dark:border-white/10">
-                    <div className="flex gap-1.5">
-                      <div className="w-3 h-3 rounded-full bg-red-400" />
-                      <div className="w-3 h-3 rounded-full bg-amber-400" />
-                      <div className="w-3 h-3 rounded-full bg-green-400" />
-                    </div>
-                    <div className="flex-1 text-center">
-                      <span className="text-xs text-[#9E9890] bg-[#F5F4F0] dark:bg-[#1A1917] px-4 py-1 rounded-full">
-                        {app.url || 'Preview'}
-                      </span>
-                    </div>
-                    <motion.button
-                      whileHover={{ rotate: 180 }}
-                      transition={{ duration: 0.3 }}
-                      onClick={() => {
-                        setIframeLoaded(false)
-                        const iframe = document.querySelector('iframe')
-                        if (iframe) iframe.src = iframe.src
-                      }}
-                      className="p-1 text-[#9E9890] hover:text-[#E8601A]"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                    </motion.button>
-                  </div>
-
-                  {/* iframe */}
-                  <div className="relative" style={{ height: '70vh', minHeight: '500px' }}>
-                    {!iframeLoaded && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#F5F4F0] dark:bg-[#1A1917]">
-                        <div className="text-center">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E8601A] mx-auto mb-3" />
-                          <p className="text-sm font-semibold text-[#1A1917] dark:text-white mb-1">
-                            {language === 'hi' ? 'बिल्ड हो रहा है...' : 'Building Environment...'}
-                          </p>
-                          <p className="text-xs text-[#9E9890]">
-                            {language === 'hi' ? 'कृपया प्रतीक्षा करें...' : 'This may take a few moments...'}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    {app.url ? (
-                      <iframe
-                        src={app.url}
-                        className="w-full h-full border-0"
-                        onLoad={() => setIframeLoaded(true)}
-                        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                        title={`${app.name} preview`}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <p className="text-sm text-[#9E9890]">
-                          {language === 'hi' ? 'कोई URL उपलब्ध नहीं' : 'No URL available for preview'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
             </div>
-          )}
-        </main>
+          </div>
+
+          <div className="flex-1 overflow-hidden">
+            <AppChat app={app} onUpdate={fetchApp} />
+          </div>
+
+        </div>
+
+        {/* Right Panel: Full-bleed Iframe */}
+        <div className="flex-1 flex flex-col h-full bg-[#E4E1DA] dark:bg-white/10 rounded-2xl shadow-2xl overflow-hidden relative p-[0.5px]">
+          {/* Iframe Body */}
+          <div className="flex-1 relative bg-[#F5F4F0] dark:bg-black rounded-[calc(1rem-0.5px)] overflow-hidden">
+            <AnimatePresence mode="wait">
+              {isDeploying ? (
+                <motion.div
+                  key="deploying"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-[#1A1917] z-10"
+                >
+                  <div className="relative">
+                    <div className="w-16 h-16 border-4 border-[#FDF0E8] dark:border-[#E8601A]/20 rounded-full" />
+                    <div className="w-16 h-16 border-4 border-[#E8601A] rounded-full border-t-transparent animate-spin absolute inset-0" />
+                  </div>
+                  <h3 className="mt-6 text-lg font-semibold text-[#1A1917] dark:text-white">
+                    {language === 'hi' ? 'एज नेटवर्क पर डिप्लॉय हो रहा है...' : 'Deploying to Edge Network...'}
+                  </h3>
+                  <p className="mt-2 text-sm text-[#6B6560] dark:text-[#9E9890]">
+                    {language === 'hi' ? 'इसमें 45-60 सेकंड लग सकते हैं' : 'This usually takes 45-60 seconds'}
+                  </p>
+                </motion.div>
+              ) : !iframeLoaded ? (
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 flex items-center justify-center bg-white dark:bg-[#1A1917] z-10"
+                >
+                  <Loader2 className="w-8 h-8 animate-spin text-[#E8601A]" />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            {iframeUrl && (
+              <iframe
+                src={iframeUrl}
+                className="w-full h-full border-0 absolute inset-0 z-0 bg-white"
+                onLoad={() => setIframeLoaded(true)}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                title={`${app.name} preview`}
+              />
+            )}
+          </div>
+        </div>
+
       </div>
     </div>
   )

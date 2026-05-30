@@ -37,6 +37,15 @@ export default defineSchema({
     shownToOwner: v.optional(v.boolean()),
     evolutionCount: v.optional(v.number()),
     lastEvolvedAt: v.optional(v.number()),
+    messages: v.optional(
+      v.array(
+        v.object({
+          role: v.union(v.literal("user"), v.literal("assistant")),
+          content: v.string(),
+          timestamp: v.number(),
+        })
+      )
+    ),
     createdAt: v.number(),
   }).index("by_trader", ["traderId"]).index("by_app_id", ["appId"]),
 

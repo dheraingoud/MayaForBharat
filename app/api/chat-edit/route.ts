@@ -159,6 +159,7 @@ ${skills}`,
       appId,
       projectName: app.name.toLowerCase().replace(/\s+/g, '-'),
       directory: buildDir,
+      vercelProjectId: app.projectId,
     })
 
     // Update the store with new URL

@@ -57,15 +57,6 @@ For multi-step tasks, state a brief plan:
 2. [Step] → verify: [check]
 3. [Step] → verify: [check]
 ```
-## 5. Bug Fix Policy
-
-For debugging, stack traces, failing tests, or complex refactors:
-
-1. Spawn Codex CLI
-2. Ask Codex to analyze and patch small or major issues
-3. Review Codex output
-4. Apply changes yourself if not satisfied
-5. Run tests again
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 

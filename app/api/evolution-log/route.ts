@@ -94,17 +94,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // If no real data yet, provide one pre-seeded entry for demo
-    if (entries.length === 0) {
-      entries.push({
-        id: 'seed-1',
-        status: 'pending',
-        title: 'सर्च बार जोड़ें — Add Search Bar',
-        description: `${app.name} needs a search bar on the dashboard for quick item lookup. This will improve usability for shops with 50+ items.`,
-        timestamp: new Date().toISOString(),
-        category: 'new_feature',
-      })
-    }
+    // No placeholder data — only real evolution entries
 
     // Stats
     const stats = {

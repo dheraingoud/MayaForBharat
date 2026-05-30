@@ -69,18 +69,13 @@ export default function BuilderPage() {
     }
   }, [router])
 
-  if (!mounted) return null
-
-  // If no spec and not redirected yet, show nothing
-  if (!spec) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F5F4F0] dark:bg-[#1A1917]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E8601A]" />
-      </div>
-    )
-  }
-
-  const handleCreateApp = async () => {
+  useEffect(() => {
+    if (spec && buildStage === 'idle' && mounted) {
+      handleCreateApp()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec, mounted])
+  async function handleCreateApp() {
     if (!spec || buildStage !== 'idle') return
     setBuildError(null)
 
@@ -122,7 +117,7 @@ export default function BuilderPage() {
                 setBuildStage(data.stage)
               } else if (data.type === 'progress') {
                 if (data.message.includes('chunks')) {
-                  const match = data.message.match(/chunks\.\.\. (\d+)/)
+                  const match = data.message.match(/generating\.\.\. \((\d+) chunks\)/)
                   const count = match ? match[1] : ''
                   setSseMessage(language === 'hi' ? `कोड लिख रहा हूँ... (${count} चंक्स)` : `Writing application code... (${count} chunks)`)
                 } else if (data.message.includes('Retrying')) {
@@ -145,7 +140,7 @@ export default function BuilderPage() {
                   setSseMessage(data.message)
                 }
               } else if (data.type === 'error') {
-                setBuildError(data.message)
+                setBuildError(data.message || 'Build failed')
                 setBuildStage('error')
               } else if (data.type === 'done') {
                 setBuildStage('done')
@@ -171,6 +166,43 @@ export default function BuilderPage() {
       setBuildError(e instanceof Error ? e.message : 'Unknown error')
       setBuildStage('error')
     }
+  }
+
+  useEffect(() => {
+    setMounted(true)
+    // Load spec from localStorage if coming from /record
+    try {
+      const raw = localStorage.getItem('maya-app-spec')
+      if (raw) {
+        const s = JSON.parse(raw)
+        setSpec(s)
+        setAppName(s.name || '')
+        setAppDescription(s.descriptionEn || '')
+      } else {
+        // No spec → redirect to record page
+        router.replace('/record')
+      }
+    } catch {
+      router.replace('/record')
+    }
+  }, [router])
+
+  useEffect(() => {
+    if (spec && buildStage === 'idle' && mounted) {
+      handleCreateApp()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec, mounted])
+
+  if (!mounted) return null
+
+  // If no spec and not redirected yet, show nothing
+  if (!spec) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F5F4F0] dark:bg-[#1A1917]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E8601A]" />
+      </div>
+    )
   }
 
   const stageInfo = STAGE_INFO[buildStage]
@@ -342,6 +374,7 @@ export default function BuilderPage() {
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
               <motion.button
+                id="build-trigger-btn"
                 whileHover={buildStage === 'idle' ? { scale: 1.05 } : {}}
                 whileTap={buildStage === 'idle' ? { scale: 0.95 } : {}}
                 onClick={buildStage === 'idle' ? handleCreateApp : buildStage === 'error' ? () => setBuildStage('idle') : undefined}

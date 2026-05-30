@@ -416,7 +416,7 @@ export async function runEvolutionCycle(
   if (allProposals.length === 0) return result
 
   // Apply daily cap — execute at most maxProposalsPerCycle, save the rest
-  const cap = (config.maxProposalsPerCycle ?? 2)
+  const cap = 2
   const proposals = allProposals.slice(0, cap)
   const overflow = allProposals.slice(cap)
   if (overflow.length > 0) {
@@ -489,7 +489,7 @@ export async function runEvolutionCycle(
         // Ask the visual tester agent (via screenshot.ts diff) to evaluate
         const diffResult = await screenshotDiff(app.vercelUrl, previewUrl)
         
-        if (diffResult.diffPct > config.maxScreenshotDiffPct) {
+        if (diffResult.diffPct > 5) {
           result.gateFailures.push({ gate: 'visual_regression', count: 1 })
           await deleteVercelDeployment(previewUrl).catch(() => {})
           await discardWorktree(wtInfo)
@@ -522,7 +522,7 @@ export async function runEvolutionCycle(
         pending.push({
           id: `imp-${Date.now()}`,
           title: proposal.titleEn,
-          description: proposal.descriptionEn || proposal.titleEn,
+          description: proposal.description || proposal.titleEn,
           category: proposal.category,
           timestamp: new Date().toISOString(),
           wtInfo: wtInfo // Keep worktree info so it can be merged on approval

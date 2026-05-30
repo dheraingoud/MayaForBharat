@@ -69,36 +69,20 @@ export async function POST(request: Request) {
         if (!raw) throw new Error('Build failed after retries')
 
         sendEvent('progress', { message: 'Parsing built files...' })
-        let parsed: { files: Array<{ path: string; content: string }> }
-        try {
-          parsed = JSON.parse(raw)
-        } catch {
-          throw new Error('Invalid build output (not valid JSON)')
-        }
-
-        if (!parsed.files || !Array.isArray(parsed.files)) {
-          throw new Error('Build output missing files array')
-        }
-
-        const safeFiles = sanitizeFiles(parsed.files)
-        if (safeFiles.length === 0) {
+        const { parseModelOutput } = await import('@/lib/tags')
+        const ops = parseModelOutput(raw)
+        const rawFiles = ops.filter(op => op.type === 'write').map(op => ({ path: op.path, content: op.content || '' }))
+        
+        if (rawFiles.length === 0) {
           throw new Error('Build generated no valid files')
         }
 
-        sendEvent('progress', { message: 'Running AI Code Review...' })
-        const reviewResult = await reviewAndFixCode(safeFiles)
-        
-        let finalFiles = safeFiles
-        if (reviewResult.status === 'fail' && reviewResult.fixedFiles) {
-          sendEvent('progress', { message: 'Review complete. Applying AI fixes...' })
-          const fixedSanitized = sanitizeFiles(reviewResult.fixedFiles)
-          finalFiles = [...safeFiles]
-          for (const fixed of fixedSanitized) {
-            const idx = finalFiles.findIndex(f => f.path === fixed.path)
-            if (idx !== -1) finalFiles[idx] = fixed
-            else finalFiles.push(fixed)
-          }
+        const safeFiles = sanitizeFiles(rawFiles)
+        if (safeFiles.length === 0) {
+          throw new Error('Build generated no valid files after sanitization')
         }
+
+        let finalFiles = safeFiles
 
         sendEvent('progress', { message: 'Applying unified design system...' })
         // ── Inject Dynamic Design Tokens (globals.css) ──
@@ -119,13 +103,97 @@ export async function POST(request: Request) {
         }
 
         sendEvent('stage', { stage: 'deploying' })
-        sendEvent('progress', { message: 'Scaffolding Next.js app and deploying to Vercel...' })
+        sendEvent('progress', { message: 'Scaffolding Next.js app and deploying to Vercel Preview...' })
+
+        const projectName = spec.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-')
+        const token = process.env.DEPLOY_TOKEN
+
+        let previewDeployResult: any = null
+        let deployAttempts = 0
+        const MAX_DEPLOY_RETRIES = 2
+
+        while (deployAttempts <= MAX_DEPLOY_RETRIES) {
+          deployAttempts++
+          
+          // 1. Deploy to preview (with strict typescript config)
+          previewDeployResult = await deployToVercel({
+            appId,
+            projectName,
+            directory: buildDir,
+            target: 'preview',
+          })
+          
+          if (previewDeployResult.success) {
+            break // Success!
+          }
+          
+          // It failed
+          if (deployAttempts > MAX_DEPLOY_RETRIES || !token || !previewDeployResult.deploymentId) {
+            throw new Error(`Preview build failed after ${MAX_DEPLOY_RETRIES} retries.`)
+          }
+          
+          sendEvent('progress', { message: `Vercel preview build failed (Attempt ${deployAttempts}/${MAX_DEPLOY_RETRIES}). Fetching compiler logs...` })
+          
+          const { getDeploymentLogs } = await import('@/lib/deploy')
+          const logs = await getDeploymentLogs(previewDeployResult.deploymentId, token)
+          
+          sendEvent('progress', { message: 'Analyzing build errors and rewriting code...' })
+          
+          const { fixVercelBuildErrors } = await import('@/lib/voice-pipeline')
+          const newFiles = await fixVercelBuildErrors(filteredFiles, logs)
+          
+          sendEvent('progress', { message: 'Applying AI fixes and redeploying...' })
+          
+          // Update filteredFiles so the final builtApp has the updated code
+          filteredFiles.length = 0
+          filteredFiles.push(...newFiles)
+          
+          // Write updated files to disk for Vercel deploy
+          for (const file of filteredFiles) {
+            const filePath = path.join(buildDir, file.path)
+            await fs.mkdir(path.dirname(filePath), { recursive: true })
+            await fs.writeFile(filePath, file.content, 'utf-8')
+          }
+        }
+
+        sendEvent('progress', { message: 'Preview build passed. Promoting to Production...' })
+
+        // 2. Deploy to production (with prod config)
+        let existingVercelProjectId: string | undefined = undefined
+        try {
+          const { getApp } = await import('@/lib/store')
+          const existingApp = await getApp(appId)
+          if (existingApp?.projectId) {
+            existingVercelProjectId = existingApp.projectId
+          }
+        } catch (e) {
+          console.warn('Failed to fetch existing app for vercelProjectId', e)
+        }
 
         const deployResult = await deployToVercel({
           appId,
-          projectName: spec.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-'),
+          projectName,
           directory: buildDir,
+          target: 'production',
+          vercelProjectId: existingVercelProjectId,
         })
+
+        // 3. Generate a quick chat summary
+        sendEvent('progress', { message: 'Generating app summary...' })
+        let summaryText = 'I have built your app! It includes all the requested features and is deployed live.'
+        try {
+          const { nimChat, MODELS } = await import('@/lib/nim-client')
+          const sumRes = await nimChat({
+            model: MODELS.PLANNER, // Use fast model
+            messages: [
+              { role: 'system', content: 'You are MAYA, an AI app builder. The user just asked you to build an app. Summarize what you built in 2-3 short, friendly sentences. Be extremely concise. Start with "I have built your app!" or similar.' },
+              { role: 'user', content: `App Name: ${spec.name}\nDescription: ${spec.descriptionEn}` }
+            ]
+          })
+          if (sumRes) summaryText = sumRes
+        } catch (e) {
+          console.warn('[api/build] Failed to generate summary', e)
+        }
 
         const builtApp = {
           id: appId,
@@ -140,6 +208,10 @@ export async function POST(request: Request) {
           adminUsername: spec.adminUsername,
           adminPin: spec.adminPin,
           shownToOwner: false,
+          messages: [
+            { role: 'user' as const, content: spec.descriptionEn, timestamp: Date.now() - 60000 },
+            { role: 'assistant' as const, content: summaryText, timestamp: Date.now() }
+          ],
           files: filteredFiles,
         }
         await addApp(builtApp)

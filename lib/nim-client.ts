@@ -64,14 +64,14 @@ export type ModelConfig = {
 }
 
 export const MODELS = {
-  /** Llama 3.3 70B Instruct — THE code writer. Blazing fast, high token output */
+  /** Step 3.7 Flash — THE code writer. High-IQ model for drafting the architecture blueprint */
   BUILDER: {
-    id: 'meta/llama-3.3-70b-instruct',
-    maxTokens: 16384,
+    id: 'stepfun-ai/step-3.7-flash',
+    maxTokens: 8192,
     thinking: null,
     temperature: 1,
     topP: 1,
-    maxTools: 25,
+    maxTools: 10,
   },
 
   /** Step 3.7 Flash — Fast, high-IQ model for drafting the architecture blueprint */
@@ -165,6 +165,21 @@ export const FALLBACK_MODEL: ModelConfig = {
   temperature: 0.8,
   topP: 0.95,
   maxTools: 25,
+}
+
+/** Stepfun-specific fallback: if step-3.7-flash fails, try Llama then GLM */
+const STEPFUN_FALLBACK: ModelConfig = {
+  id: 'meta/llama-3.3-70b-instruct',
+  maxTokens: 8192,
+  thinking: null,
+  temperature: 1,
+  topP: 1,
+  maxTools: 10,
+}
+
+/** Model-specific fallback chain. If a model ID matches a key, try those fallbacks in order before the global FALLBACK_MODEL. */
+const MODEL_FALLBACK_CHAINS: Record<string, ModelConfig[]> = {
+  'stepfun-ai/step-3.7-flash': [STEPFUN_FALLBACK, FALLBACK_MODEL],
 }
 
 export type ModelKey = keyof typeof MODELS
@@ -303,7 +318,7 @@ function sanitizeNimToolSchemas(tools: unknown[] | undefined): unknown[] | undef
 
 export async function nimCallWithRetry<T>(
   fn: (client: OpenAI) => Promise<T>,
-  maxRetries = 3
+  maxRetries = Math.max(3, NIM_KEYS.length)
 ): Promise<T> {
   let lastError: Error | null = null
 
@@ -313,19 +328,46 @@ export async function nimCallWithRetry<T>(
     } catch (e: unknown) {
       lastError = e as Error
       const status = (e as { status?: number }).status
+      const errMsg = (e as Error).message || ''
 
-      // Rate limit — rotate to next key and retry with backoff
+      // Always rotate key on failure (next iteration gets a fresh client with next key)
+      console.warn(`[nim] Attempt ${i + 1}/${maxRetries} failed (status: ${status || 'N/A'}): ${errMsg.slice(0, 150)}`)
+
+      // Don't retry on 400 (bad request) — caller should handle
+      if (status === 400) {
+        throw e
+      }
+
+      // Rate limit (429) — backoff longer
       if (status === 429 && i < maxRetries - 1) {
-        const backoffMs = 1000 * Math.pow(2, i) // 1s, 2s, 4s
+        const backoffMs = 2000 * Math.pow(2, i) // 2s, 4s, 8s
         console.warn(`[nim] 429 rate limit, rotating key, backoff ${backoffMs}ms`)
         await new Promise(r => setTimeout(r, backoffMs))
         continue
       }
 
-      // Server error — retry with backoff
+      // Server error (500+) — backoff and retry with next key
       if (status && status >= 500 && i < maxRetries - 1) {
         const backoffMs = 2000 * Math.pow(2, i)
-        console.warn(`[nim] ${status} server error, retry in ${backoffMs}ms`)
+        console.warn(`[nim] ${status} server error, rotating key, retry in ${backoffMs}ms`)
+        await new Promise(r => setTimeout(r, backoffMs))
+        continue
+      }
+
+      // Connection errors (ECONNREFUSED, ECONNRESET, fetch failed, etc.) — retry with next key
+      const isConnectionError = errMsg.includes('ECONNRE') || errMsg.includes('fetch failed') || 
+        errMsg.includes('socket hang up') || errMsg.includes('network') || errMsg.includes('ETIMEDOUT')
+      if (isConnectionError && i < maxRetries - 1) {
+        const backoffMs = 1000 * (i + 1)
+        console.warn(`[nim] Connection error, rotating key, retry in ${backoffMs}ms`)
+        await new Promise(r => setTimeout(r, backoffMs))
+        continue
+      }
+
+      // Unknown error on non-last attempt — still retry with next key
+      if (i < maxRetries - 1) {
+        const backoffMs = 1500 * Math.pow(2, i)
+        console.warn(`[nim] Unknown error, rotating key, retry in ${backoffMs}ms`)
         await new Promise(r => setTimeout(r, backoffMs))
         continue
       }
@@ -376,94 +418,125 @@ const TIMEOUT_RETRY_REASONING_BUDGET = 8192
 export async function nimChat(options: NimChatOptions): Promise<string> {
   const { model, messages, responseFormat, maxTokensOverride, tools, stream, onChunk, allowFallback = true } = options
 
-  // First attempt with primary model
-  try {
-    const result = await _doNimChat({
-      model,
-      messages,
-      responseFormat,
-      maxTokensOverride,
-      tools,
-      stream,
-      onChunk,
-    })
-    if (result && result.trim().length > 0) {
-      return result
-    }
-  } catch (e: unknown) {
-    const errStatus = (e as { status?: number }).status
-    const errMsg = (e as Error).message || ''
+  let currentMessages = [...messages]
+  let fullResult = ''
+  let attempts = 0
+  const maxContinuations = 3
 
-    // On timeout/504 — skip reduced-reasoning retry, go straight to fallback
-    if (errMsg.includes('timeout') || errMsg.includes('AbortError') || errStatus === 504) {
-      if (allowFallback) {
-        console.warn(`[nim] Timeout from ${model.id}, trying fallback ${FALLBACK_MODEL.id}`)
-        try {
-          const fallbackResult = await _doNimChat({
-            model: FALLBACK_MODEL,
-            messages,
-            responseFormat,
-            maxTokensOverride,
-            tools,
-          })
-          if (fallbackResult && fallbackResult.trim().length > 0) return fallbackResult
-        } catch {
-          // Fall through to re-throw
+  while (attempts <= maxContinuations) {
+    try {
+      const result = await _doNimChat({
+        model,
+        messages: currentMessages,
+        responseFormat,
+        maxTokensOverride,
+        tools,
+        stream,
+        onChunk,
+      })
+      
+      if (result && result.trim().length > 0) {
+        fullResult += result
+        return fullResult
+      }
+      return fullResult
+      
+    } catch (e: any) {
+      if (e.message === 'max_tokens_reached' && attempts < maxContinuations) {
+        console.log(`[nim] Model ${model.id} hit max tokens, auto-continuing (Attempt ${attempts + 1}/${maxContinuations})`)
+        fullResult += e.partialContent || ''
+        currentMessages.push({ role: 'assistant', content: e.partialContent || '' })
+        currentMessages.push({ role: 'user', content: 'Continue exactly where you left off, without repeating anything. Start immediately with the next character.' })
+        attempts++
+        continue
+      }
+      
+      if (e.message === 'max_tokens_reached') {
+        console.warn(`[nim] Model ${model.id} hit max tokens and exhausted continuations. Returning partial output.`)
+        fullResult += e.partialContent || ''
+        return fullResult
+      }
+
+      const errStatus = e.status
+      const errMsg = e.message || ''
+
+      // On timeout/504 — try model-specific fallback chain, then global fallback
+      if (errMsg.includes('timeout') || errMsg.includes('AbortError') || errStatus === 504) {
+        if (allowFallback) {
+          const chain = MODEL_FALLBACK_CHAINS[model.id] || [FALLBACK_MODEL]
+          for (const fb of chain) {
+            console.warn(`[nim] Timeout from ${model.id}, trying fallback ${fb.id}`)
+            try {
+              const fallbackResult = await _doNimChat({
+                model: fb,
+                messages,
+                responseFormat,
+                maxTokensOverride,
+                tools,
+              })
+              if (fallbackResult && fallbackResult.trim().length > 0) return fullResult + fallbackResult
+            } catch {
+              continue // try next in chain
+            }
+          }
+        }
+        throw e
+      }
+
+      // claude-proxy: retry on 400 stripping problematic fields
+      if (errStatus === 400) {
+        if (errMsg.includes('reasoning_budget') || errMsg.includes('chat_template') || errMsg.includes('reasoning_content')) {
+          console.warn(`[nim] 400 from ${model.id}, retrying without thinking params`)
+          try {
+            const retryResult = await _doNimChat({
+              model: { ...model, thinking: null },
+              messages: messages.map(m => {
+                const cleaned = { ...m }
+                delete (cleaned as Record<string, unknown>).reasoning_content
+                return cleaned
+              }),
+              responseFormat,
+              maxTokensOverride,
+              tools,
+              stream,
+              onChunk,
+            })
+            if (retryResult && retryResult.trim().length > 0) return fullResult + retryResult
+          } catch {
+            // Fall through to fallback
+          }
         }
       }
+
+      // For 500+ or empty response, try model-specific fallback chain
+      if (allowFallback && (errStatus === undefined || errStatus >= 500 || errStatus === 400)) {
+        console.error(`[nim] Chat error with ${model.id}:`, e)
+        const chain = MODEL_FALLBACK_CHAINS[model.id] || [FALLBACK_MODEL]
+        for (const fb of chain) {
+          console.warn(`[nim] Primary model ${model.id} failed, trying fallback ${fb.id}`)
+          try {
+            const fallbackResult = await _doNimChat({
+              model: fb,
+              messages,
+              responseFormat,
+              maxTokensOverride,
+              tools,
+              stream,
+              onChunk,
+            })
+            if (fallbackResult && fallbackResult.trim().length > 0) return fullResult + fallbackResult
+          } catch (fbErr) {
+            console.error(`[nim] Fallback model ${fb.id} also failed:`, fbErr)
+            continue // try next in chain
+          }
+        }
+      }
+      
       throw e
     }
-
-    // claude-proxy: retry on 400 stripping problematic fields
-    if (errStatus === 400) {
-      if (errMsg.includes('reasoning_budget') || errMsg.includes('chat_template') || errMsg.includes('reasoning_content')) {
-        console.warn(`[nim] 400 from ${model.id}, retrying without thinking params`)
-        try {
-          const retryResult = await _doNimChat({
-            model: { ...model, thinking: null },
-            messages: messages.map(m => {
-              const cleaned = { ...m }
-              delete (cleaned as Record<string, unknown>).reasoning_content
-              return cleaned
-            }),
-            responseFormat,
-            maxTokensOverride,
-            tools,
-            stream,
-            onChunk,
-          })
-          if (retryResult && retryResult.trim().length > 0) return retryResult
-        } catch {
-          // Fall through to fallback
-        }
-      }
-    }
-
-    // For 500+ or empty response, try fallback if enabled
-    if (allowFallback && (errStatus === undefined || errStatus >= 500 || errStatus === 400)) {
-      console.error(`[nim] Chat error with ${model.id}:`, e)
-      console.warn(`[nim] Primary model ${model.id} failed, trying fallback ${FALLBACK_MODEL.id}`)
-      try {
-        const fallbackResult = await _doNimChat({
-          model: FALLBACK_MODEL,
-          messages,
-          responseFormat,
-          maxTokensOverride,
-          tools,
-          stream,
-          onChunk,
-        })
-        if (fallbackResult && fallbackResult.trim().length > 0) {
-          return fallbackResult
-        }
-      } catch {
-        // Fall through
-      }
-    }
-    throw e
   }
 
-  // Empty response from primary — retry once with thinking disabled
+  // If we reach here, we exhausted attempts (should only happen if result is empty string without max_tokens error)
   console.warn(`[nim] Empty response from ${model.id}, retry without thinking`)
   const retryResult = await _doNimChat({
     model: { ...model, thinking: null },
@@ -476,7 +549,7 @@ export async function nimChat(options: NimChatOptions): Promise<string> {
   })
 
   if (retryResult && retryResult.trim().length > 0) {
-    return retryResult
+    return fullResult + retryResult
   }
 
   throw new Error(`[nim] Empty response from ${model.id} after retries`)
@@ -542,13 +615,13 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
 
     try {
       if (stream || onChunk) {
-        const streamRes = await client.chat.completions.create({
+        const streamRes: any = await client.chat.completions.create({
           ...params as any,
           stream: true,
           signal: controller.signal as AbortSignal,
         })
         let thisChunkContent = ''
-        let finishReason: string | null = null
+        let finishReason: any = null
         try {
           for await (const chunk of streamRes) {
             const content = chunk.choices[0]?.delta?.content || ''
@@ -572,7 +645,7 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
           ...params as any,
           signal: controller.signal as AbortSignal,
         })
-        const finishReason = res.choices[0]?.finish_reason
+        const finishReason: any = res.choices[0]?.finish_reason
         const content = res.choices[0]?.message?.content ?? ''
         if (finishReason === 'length' || finishReason === 'max_tokens') {
           throw Object.assign(new Error('max_tokens_reached'), { partialContent: content })

@@ -8,6 +8,26 @@
  * Categories: kirana | tailor | dairy | pharmacy | electronics | restaurant | other
  */
 
+export const MAYA_REGISTRY = `
+COMPONENT GUIDE:
+DO NOT import from "@/components/ui/*" — those files do not exist.
+Instead, build all UI components inline using standard HTML elements + Tailwind CSS classes:
+- Button: <button className="px-4 py-2 rounded-xl bg-primary text-white hover:opacity-90 transition-all">
+- Card: <div className="rounded-2xl border border-white/20 bg-white/70 backdrop-blur-md shadow-lg p-6">
+- Input: <input className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-primary outline-none" />
+- Badge: <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
+- Table: <table className="w-full"><thead><tr className="border-b"><th className="text-left p-3 text-sm font-medium text-gray-500">
+All components MUST be self-contained inline code. Never reference external component libraries.
+`
+
+export const STACK_CONTRACT = `
+STACK CONTRACT (CRITICAL):
+- Next.js 15 App Router
+- React 19 (use server/client)
+- Tailwind CSS
+- Lucide React icons
+`
+
 export type BusinessCategory =
   | 'kirana'
   | 'tailor'

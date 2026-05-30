@@ -67,7 +67,8 @@ export async function POST(request: Request) {
             appId,
             projectName: app.name,
             directory: getBuildsDir(appId),
-            target: 'production'
+            target: 'production',
+            vercelProjectId: app.projectId,
           })
           
           if (deployRes.url) {

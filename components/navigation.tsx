@@ -7,9 +7,19 @@ import { content } from '@/lib/translations'
 import { useRouter, usePathname } from 'next/navigation'
 import { Sun, Moon } from 'lucide-react'
 import { useState, useEffect } from 'react'
-import { useAuth, UserButton } from '@clerk/nextjs'
 
-export function Navigation({ hideCta = false }: { hideCta?: boolean }) {
+// Mock Clerk to prevent crash when ClerkProvider is disabled
+let useAuth = () => ({ isLoaded: true, isSignedIn: true })
+let UserButton = (props: any) => <div className="w-8 h-8 sm:w-9 sm:h-9 bg-gray-300 rounded-full" />
+try {
+  const clerk = require('@clerk/nextjs')
+  if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    useAuth = clerk.useAuth
+    UserButton = clerk.UserButton
+  }
+} catch (e) {}
+
+export function Navigation({ hideCta = false, position = 'center' }: { hideCta?: boolean, position?: 'center' | 'top-left' }) {
   const { language, setLanguage } = useLanguage()
   const { theme, setTheme } = useTheme()
   const router = useRouter()
@@ -33,6 +43,11 @@ export function Navigation({ hideCta = false }: { hideCta?: boolean }) {
 
   if (!mounted) return null
 
+  // Determine container classes based on position
+  const containerClasses = position === 'center' 
+    ? `fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${isLander ? 'w-[95%] max-w-4xl' : 'w-fit min-w-[320px]'}`
+    : `relative z-50 transition-all duration-300 w-fit`
+
   return (
     <>
       {/* Floating Island Navbar */}
@@ -40,9 +55,7 @@ export function Navigation({ hideCta = false }: { hideCta?: boolean }) {
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.6, delay: 0.2 }}
-        className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${
-          isLander ? 'w-[95%] max-w-4xl' : 'w-fit min-w-[320px]'
-        }`}
+        className={containerClasses}
       >
         <div className="bg-white/80 dark:bg-[#2A2925]/80 backdrop-blur-xl rounded-full border border-white/20 dark:border-white/10 shadow-2xl">
           <div className={`flex items-center justify-between py-3 px-6 sm:px-8 ${isLander ? '' : 'gap-8'}`}>
