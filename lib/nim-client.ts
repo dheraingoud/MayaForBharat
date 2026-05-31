@@ -69,7 +69,7 @@ export const MODELS = {
     id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 16384,
     thinking: null,
-    temperature: 0.8,
+    temperature: 0.85,
     topP: 1,
     maxTools: 10,
   },
@@ -627,10 +627,26 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
         })
         let thisChunkContent = ''
         let finishReason: any = null
+        let hasStartedReasoning = false
+        let hasFinishedReasoning = false
         try {
           for await (const chunk of streamRes) {
+            const reasoning = chunk.choices[0]?.delta?.reasoning_content || chunk.choices[0]?.delta?.reasoning || ''
+            if (reasoning) {
+              if (!hasStartedReasoning) {
+                thisChunkContent += '<think>\n'
+                hasStartedReasoning = true
+              }
+              thisChunkContent += reasoning
+              onChunk?.(reasoning)
+            }
+
             const content = chunk.choices[0]?.delta?.content || ''
             if (content) {
+              if (hasStartedReasoning && !hasFinishedReasoning) {
+                thisChunkContent += '\n</think>\n'
+                hasFinishedReasoning = true
+              }
               thisChunkContent += content
               onChunk?.(content)
             }
