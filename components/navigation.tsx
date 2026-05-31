@@ -8,16 +8,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { Sun, Moon } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
-// Mock Clerk to prevent crash when ClerkProvider is disabled
-let useAuth = () => ({ isLoaded: true, isSignedIn: true })
-let UserButton = (props: any) => <div className="w-8 h-8 sm:w-9 sm:h-9 bg-gray-300 rounded-full" />
-try {
-  const clerk = require('@clerk/nextjs')
-  if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    useAuth = clerk.useAuth
-    UserButton = clerk.UserButton
-  }
-} catch (e) {}
+import { useAuth, UserButton } from '@clerk/nextjs'
 
 export function Navigation({ hideCta = false, position = 'center' }: { hideCta?: boolean, position?: 'center' | 'top-left' }) {
   const { language, setLanguage } = useLanguage()
