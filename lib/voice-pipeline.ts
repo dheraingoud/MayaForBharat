@@ -209,10 +209,6 @@ export async function buildApp(
     maxTokensOverride: 16384,
     stream: true,
     onChunk: (text) => {
-      chunkCount++
-      if (chunkCount % 50 === 0) {
-        onProgress?.(`generating... (${chunkCount} chunks)`)
-      }
       onChunk?.(text)
     }
   })

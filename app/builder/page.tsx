@@ -75,7 +75,8 @@ export default function BuilderPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, mounted])
-  async function handleCreateApp(retryCount = 0, existingAppId?: string, partialContent: string = '') {
+
+  async function handleCreateApp(retryCount = 0, existingAppId?: string, partialContent: string = '', startChunkCount = 0) {
     if (!spec || (buildStage !== 'idle' && retryCount === 0)) return
 
     setBuildError(null)
@@ -87,6 +88,9 @@ export default function BuilderPage() {
 
     // Generate or reuse the appId
     const currentAppId = existingAppId || crypto.randomUUID()
+
+    let rawCode = partialContent
+    let localChunkCount = startChunkCount
 
     try {
       // Remove spec from local storage immediately so a page refresh doesn't trigger a duplicate build
@@ -117,7 +121,6 @@ export default function BuilderPage() {
 
       let isDone = false
       let isError = false
-      let rawCode = partialContent
 
       while (true) {
         const { done, value } = await reader.read()
@@ -133,12 +136,12 @@ export default function BuilderPage() {
                 setBuildStage(data.stage)
               } else if (data.type === 'chunk') {
                 rawCode += data.text
+                localChunkCount++
+                if (localChunkCount % 50 === 0) {
+                  setSseMessage(language === 'hi' ? `कोड लिख रहा हूँ... (${localChunkCount} चंक्स)` : `Writing application code... (${localChunkCount} chunks)`)
+                }
               } else if (data.type === 'progress') {
-                if (data.message.includes('chunks')) {
-                  const match = data.message.match(/generating\.\.\. \((\d+) chunks\)/)
-                  const count = match ? match[1] : ''
-                  setSseMessage(language === 'hi' ? `कोड लिख रहा हूँ... (${count} चंक्स)` : `Writing application code... (${count} chunks)`)
-                } else if (data.message.includes('Retrying')) {
+                if (data.message.includes('Retrying')) {
                   setSseMessage(language === 'hi' ? 'कोड सुधार रहा हूँ...' : 'Optimizing application code...')
                 } else if (data.message === 'building_code') {
                   setSseMessage(language === 'hi' ? 'ऐप का निर्माण शुरू कर रहा हूँ...' : 'Starting application build...')
@@ -176,9 +179,9 @@ export default function BuilderPage() {
       }
 
       if (!isDone && !isError) {
-        if (retryCount < 2) {
+        if (retryCount < 10) {
           setSseMessage(language === 'hi' ? 'सर्वर टाइमआउट हो गया, फिर से कोशिश कर रहा हूँ...' : 'Model timed out. Retrying generation...')
-          setTimeout(() => handleCreateApp(retryCount + 1, currentAppId, rawCode), 2000)
+          setTimeout(() => handleCreateApp(retryCount + 1, currentAppId, rawCode, localChunkCount), 2000)
           return
         }
         setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
@@ -191,9 +194,9 @@ export default function BuilderPage() {
         }, 1500)
       }
     } catch (err: any) {
-      if (retryCount < 2) {
+      if (retryCount < 10) {
         setSseMessage(language === 'hi' ? 'कनेक्शन विफल, फिर से कोशिश कर रहा हूँ...' : 'Connection failed. Retrying generation...')
-        setTimeout(() => handleCreateApp(retryCount + 1, currentAppId), 2000)
+        setTimeout(() => handleCreateApp(retryCount + 1, currentAppId, rawCode, localChunkCount), 2000)
         return
       }
       setBuildError(err.message || 'An unexpected error occurred')
