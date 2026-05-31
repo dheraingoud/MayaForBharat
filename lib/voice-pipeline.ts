@@ -179,14 +179,18 @@ export async function buildApp(
 ) {
   onProgress?.('spec_ready')
 
-  // Deterministic blueprint — no PLANNER model call needed (saves 120+ seconds)
+  // Deterministic blueprint — no PLANNER model call needed
   const architectureBlueprint = getDefaultBlueprint(spec.category)
+  
+  // Make sure we include lib/store.ts in every blueprint natively
+  if (!architectureBlueprint.files.includes('lib/store.ts')) {
+    architectureBlueprint.files.push('lib/store.ts')
+  }
+
   onProgress?.(`Architecture: ${architectureBlueprint.scale} scale (${architectureBlueprint.files.length} files)`)
-
-  // Build the system prompt (skills are NOT injected — they bloated input by ~5000 tokens)
-  const systemPrompt = buildBuilderSystemPrompt({ spec, architectureBlueprint })
-
   onProgress?.('building_code')
+
+  const systemPrompt = buildBuilderSystemPrompt({ spec, architectureBlueprint })
 
   const messages: import('@/lib/nim-client').ChatMessage[] = [
     { role: 'system', content: systemPrompt },

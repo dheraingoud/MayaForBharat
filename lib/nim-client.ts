@@ -159,22 +159,22 @@ export const MODELS = {
 
 /** Fallback model used when primary model fails */
 export const FALLBACK_MODEL: ModelConfig = {
-  id: 'z-ai/glm-5.1',
-  maxTokens: 16384,
-  thinking: { enable_thinking: true, clear_thinking: false },
-  temperature: 0.8,
+  id: 'deepseek-ai/deepseek-v4-flash',
+  maxTokens: 10000,
+  thinking: { thinking: true, reasoning_effort: 'high' },
+  temperature: 1,
   topP: 0.95,
   maxTools: 25,
 }
 
 /** Stepfun-specific fallback: if step-3.7-flash fails, try Llama then GLM */
 const STEPFUN_FALLBACK: ModelConfig = {
-  id: 'meta/llama-3.3-70b-instruct',
-  maxTokens: 8192,
-  thinking: null,
-  temperature: 1,
+  id: 'z-ai/glm-5.1',
+  maxTokens: 16384,
+  thinking: { enable_thinking: true, clear_thinking: false },
+  temperature: 0.8,
   topP: 1,
-  maxTools: 10,
+  maxTools: 25,
 }
 
 /** Model-specific fallback chain. If a model ID matches a key, try those fallbacks in order before the global FALLBACK_MODEL. */

@@ -17,19 +17,22 @@ import type { AppSpec } from '../voice-pipeline'
 
 const CORE_RULES = `RULES:
 - TypeScript, Next.js 15 App Router, Tailwind CSS, lucide-react icons.
+- MANDATORY LIBRARIES: zustand (for global state), framer-motion (for all animations), recharts (for dashboards).
+- OPTIONAL LIBRARIES (for heroes/landing pages): gsap. Use three, @react-three/fiber, @react-three/drei ONLY if explicitly mentioned by the user.
 - Self-contained inline components. NEVER import from files you didn't generate.
 - ALL UI TEXT: ENGLISH ONLY. No Hindi/Devanagari in the generated app UI.`
 
 // ─── Design System ───────────────────────────────────────────────────────────
 
-const DESIGN_SYSTEM = `DESIGN (STRICT):
-- Semantic tokens: bg-background, text-foreground, bg-primary, text-primary-foreground. Define --primary, --background etc in globals.css using HSL.
-- 3-5 colors max. 1 brand + 2-3 neutrals + 1 accent. No gradients unless asked.
-- Max 2 fonts. leading-relaxed for body.
-- Cards: bg-background/70 backdrop-blur-md border border-border shadow-lg shadow-black/5.
-- Hover on ALL clickable: hover:scale-105 active:scale-95 transition-all duration-200.
-- Mobile-first. Tailwind spacing scale only (gap-4, p-4 — NO arbitrary values).
-- lucide-react for icons. NO emojis. NO placeholder grey boxes.`
+const DESIGN_SYSTEM = `DESIGN (CRITICAL):
+- The design system is everything. NEVER write explicit colors (e.g. text-white, bg-blue-500) in className.
+- ALWAYS use semantic tokens: bg-background, text-foreground, bg-primary. Define these in globals.css using HSL.
+- Create ambitious, premium aesthetics (Glassmorphism, Neomorphism, or Minimalist, Brutalism, water glass design).
+- Create rich design tokens in globals.css (e.g. --gradient-primary, --shadow-elegant).
+- Use framer-motion for micro-interactions (hover: scale, tap: scale) and page transitions.
+- Cards: bg-background/70 backdrop-blur-xl border border-white/20 shadow-2xl (Glassmorphism preferred).
+- Generate a stunning landing page (app/page.tsx) with a highly animated hero section (framer-motion).
+- lucide-react for icons. NO emojis. NO placeholder grey boxes. Generate UI that wows.`
 
 // ─── Compilation Rules ───────────────────────────────────────────────────────
 
@@ -54,7 +57,9 @@ const QUALITY_GATES = `QUALITY:
 - No monolithic files. Small focused components.
 - No "Lorem ipsum". Write real contextual copy.
 - No TS errors. Loading states (skeleton shimmer). Form validation.
-- Mobile-first (390px). Semantic HTML. Look like a funded startup landing page.`
+- Mobile-first (390px). Semantic HTML. Look like a funded startup landing page.
+- FUNCTIONAL APP: MUST generate a \`lib/store.ts\` using Zustand to manage global state.
+- NAVIGATION: \`app/layout.tsx\` MUST include a top-level Navigation bar linking to all generated pages.`
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
 

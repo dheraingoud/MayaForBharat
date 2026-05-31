@@ -196,8 +196,43 @@ export default function AppDetailPage() {
 
         {/* Right Panel: Full-bleed Iframe */}
         <div className="flex-1 flex flex-col h-full bg-[#E4E1DA] dark:bg-white/10 rounded-2xl shadow-2xl overflow-hidden relative p-[0.5px]">
+          {/* Iframe Nav Bar */}
+          <div className="flex items-center gap-3 px-4 py-2 bg-[#F5F4F0] dark:bg-[#1A1917] border-b border-[#E4E1DA] dark:border-white/10 rounded-t-[calc(1rem-0.5px)]">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-400" />
+              <div className="w-3 h-3 rounded-full bg-amber-400" />
+              <div className="w-3 h-3 rounded-full bg-green-400" />
+            </div>
+            <div className="flex-1 flex items-center gap-2 ml-2">
+              <button 
+                onClick={() => {
+                  setIframeLoaded(false);
+                  const current = iframeUrl;
+                  setIframeUrl(null);
+                  setTimeout(() => setIframeUrl(current), 50);
+                }}
+                disabled={!iframeUrl}
+                className="p-1.5 text-[#6B6560] dark:text-[#9E9890] hover:text-[#1A1917] dark:hover:text-white rounded-md hover:bg-[#E4E1DA] dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <div className="flex-1 px-3 py-1.5 bg-white dark:bg-[#2A2925] border border-[#E4E1DA] dark:border-white/10 rounded-lg text-xs text-[#6B6560] dark:text-[#9E9890] flex items-center gap-2 overflow-hidden">
+                <span className="truncate">{iframeUrl || 'Waiting for deployment...'}</span>
+              </div>
+              {iframeUrl && (
+                <a 
+                  href={iframeUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="p-1.5 text-[#6B6560] dark:text-[#9E9890] hover:text-[#1A1917] dark:hover:text-white rounded-md hover:bg-[#E4E1DA] dark:hover:bg-white/10 transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              )}
+            </div>
+          </div>
           {/* Iframe Body */}
-          <div className="flex-1 relative bg-[#F5F4F0] dark:bg-black rounded-[calc(1rem-0.5px)] overflow-hidden">
+          <div className="flex-1 relative bg-[#F5F4F0] dark:bg-black rounded-b-[calc(1rem-0.5px)] overflow-hidden">
             <AnimatePresence mode="wait">
               {isDeploying ? (
                 <motion.div
