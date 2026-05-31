@@ -60,6 +60,26 @@ export async function POST(request: Request) {
         sendEvent('stage', { stage: 'generating' })
         sendEvent('progress', { message: 'Initializing AI builder...' })
 
+        // ── Pre-save App as "building" so it appears in Dashboard even if client disconnects ──
+        try {
+          await addApp({
+            id: appId,
+            name: spec.name,
+            nameHindi: spec.nameHindi,
+            descriptionEn: spec.descriptionEn,
+            category: spec.category,
+            url: '',
+            projectId: '',
+            createdAt: new Date().toISOString(),
+            status: 'building',
+            adminUsername: spec.adminUsername,
+            adminPin: spec.adminPin,
+            files: [],
+          })
+        } catch (e) {
+          console.warn('[api/build] Failed to pre-save app', e)
+        }
+
         // Build the app
         const raw = await buildWithRetry(spec, (step) => {
           console.log(`[api/build] Progress: ${step}`)

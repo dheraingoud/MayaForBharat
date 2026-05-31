@@ -338,6 +338,11 @@ export async function nimCallWithRetry<T>(
         throw e
       }
 
+      // Immediately re-throw max_tokens_reached to allow auto-continuation
+      if (errMsg === 'max_tokens_reached') {
+        throw e
+      }
+
       // Rate limit (429) — backoff longer
       if (status === 429 && i < maxRetries - 1) {
         const backoffMs = 2000 * Math.pow(2, i) // 2s, 4s, 8s

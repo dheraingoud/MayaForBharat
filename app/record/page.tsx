@@ -86,7 +86,7 @@ declare global {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SILENCE_THRESHOLD = 0.025  // RMS below this = silence (raised from 0.015 to handle ambient noise)
-const SILENCE_DURATION_MS = 4000 // 4s of silence before auto-stop (increased for longer Hindi pauses)
+const SILENCE_DURATION_MS = 2500 // 2.5s of silence before auto-stop
 const MIN_RECORDING_MS = 2000    // Don't auto-stop in first 2s (mic warmup grace period)
 const MAX_RECORDING_MS = 30000
 
