@@ -116,7 +116,16 @@ export default function RecordPage() {
 
   useEffect(() => {
     setMounted(true)
-  }, [])
+    // Check if there is an active build running, if so redirect to dashboard
+    fetch('/api/dashboard')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.apps?.some((app: any) => app.status === 'building')) {
+          router.replace('/dashboard')
+        }
+      })
+      .catch(console.error)
+  }, [router])
 
   const t = content[language]
 

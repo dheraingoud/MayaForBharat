@@ -83,6 +83,9 @@ export default function BuilderPage() {
     setSseMessage('Connecting to builder...')
 
     try {
+      // Remove spec from local storage immediately so a page refresh doesn't trigger a duplicate build
+      localStorage.removeItem('maya-app-spec')
+
       const res = await fetch('/api/build', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,8 +157,6 @@ export default function BuilderPage() {
           }
         }
       }
-
-      localStorage.removeItem('maya-app-spec')
 
       if (currentAppId) {
         setTimeout(() => {
