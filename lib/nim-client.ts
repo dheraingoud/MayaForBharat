@@ -69,7 +69,7 @@ export const MODELS = {
     id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 16384,
     thinking: null,
-    temperature: 0.7,
+    temperature: 0.85,
     topP: 1,
     maxTools: 10,
   },

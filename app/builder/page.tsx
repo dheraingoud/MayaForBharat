@@ -106,6 +106,7 @@ export default function BuilderPage() {
       const decoder = new TextDecoder()
 
       let currentAppId = ''
+      let isDone = false
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -150,12 +151,18 @@ export default function BuilderPage() {
                 setBuiltAppId(data.appId)
                 setBuiltUrl(data.url)
                 currentAppId = data.appId
+                isDone = true
               }
             } catch (e) {
               console.warn('Failed to parse SSE line', line)
             }
           }
         }
+      }
+
+      if (!isDone && buildStage !== 'error') {
+        setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
+        setBuildStage('error')
       }
 
       if (currentAppId) {
