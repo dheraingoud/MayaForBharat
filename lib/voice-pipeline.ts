@@ -263,7 +263,7 @@ export async function buildWithRetry(
       let raw = await buildApp(spec, onProgress, useFallback, partialContent, onChunk)
 
       // Strip markdown code fences if model wrapped it
-      raw = stripCodeFences(raw)
+      raw = raw.replace(/^```[a-z]*\n?/gm, '').replace(/```$/gm, '').trim()
       
       // Strip any <think> tags (including unclosed ones) so they don't corrupt the XML parser
       raw = raw.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '')
