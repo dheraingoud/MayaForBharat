@@ -48,13 +48,18 @@ export async function POST(request: Request) {
         }
       }
 
+      let isControllerClosed = false
+      
       try {
         const hasNim = [process.env.NVIDIA_API_KEY_1, process.env.NVIDIA_API_KEY_2, process.env.NVIDIA_API_KEY_3]
           .some(k => !!k && k.length > 0 && !k.startsWith('YOUR_'))
         
         if (!hasNim) {
           sendEvent('error', { message: 'NVIDIA NIM API keys not configured. Add at least one NVIDIA_API_KEY_* to your .env.local file to enable app generation.', code: 'NO_NIM_KEYS' })
-          controller.close()
+          if (!isControllerClosed) {
+            isControllerClosed = true
+            controller.close()
+          }
           return
         }
 
@@ -252,7 +257,10 @@ export async function POST(request: Request) {
         _triggerInitialImprovements(appId, spec, deployResult.url).catch(e => console.warn('[api/build] initial improvements warning:', e))
 
         sendEvent('done', { appId, url: deployResult.url })
-        controller.close()
+        if (!isControllerClosed) {
+          isControllerClosed = true
+          controller.close()
+        }
       } catch (e: unknown) {
         const errorMsg = e instanceof Error ? e.message : String(e)
         console.error('[api/build]', errorMsg)
@@ -262,7 +270,10 @@ export async function POST(request: Request) {
         } else {
           sendEvent('error', { message: errorMsg })
         }
-        controller.close()
+        if (!isControllerClosed) {
+          isControllerClosed = true
+          controller.close()
+        }
       }
     }
   })
