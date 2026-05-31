@@ -173,8 +173,11 @@ export async function POST(request: Request) {
             await fs.mkdir(path.dirname(filePath), { recursive: true })
             await fs.writeFile(filePath, file.content, 'utf-8')
           }
-          
           continue // loop around and deploy again!
+        }
+
+        if (!previewDeployResult?.success) {
+          throw new Error('Vercel preview build failed after maximum retries. The AI could not resolve all compiler errors automatically.')
         }
 
         sendEvent('progress', { message: 'Preview build passed. Promoting to Production...' })

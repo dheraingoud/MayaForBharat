@@ -199,7 +199,7 @@ export async function buildApp(
 
   if (partialContent) {
     messages.push({ role: 'assistant', content: partialContent })
-    messages.push({ role: 'user', content: 'Continue exactly where you left off, without repeating anything. Start immediately with the next character.' })
+    messages.push({ role: 'user', content: 'Continue exactly where you left off. DO NOT output any conversational text like "Got it" or "Here is". Start immediately with the exact next character of the code.' })
   }
 
   let chunkCount = 0
