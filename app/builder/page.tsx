@@ -121,6 +121,7 @@ export default function BuilderPage() {
 
       let isDone = false
       let isError = false
+      let currentStage = 'preparing'
 
       while (true) {
         const { done, value } = await reader.read()
@@ -133,6 +134,7 @@ export default function BuilderPage() {
             try {
               const data = JSON.parse(line.slice(6))
               if (data.type === 'stage') {
+                currentStage = data.stage
                 setBuildStage(data.stage)
               } else if (data.type === 'chunk') {
                 rawCode += data.text
@@ -179,13 +181,20 @@ export default function BuilderPage() {
       }
 
       if (!isDone && !isError) {
-        if (retryCount < 10) {
+        if (currentStage === 'deploying') {
+          // If we dropped during deployment, code generation is already finished.
+          // Don't retry, just let the user know deployment is taking a while or check dashboard.
+          setBuildStage('done')
+          setSseMessage(language === 'hi' ? 'कोड सफलतापूर्वक बन गया है। डिप्लॉयमेंट में समय लग रहा है। कृपया कुछ देर में डैशबोर्ड देखें।' : 'Code generated successfully! Vercel deployment is taking longer than expected. Please check your Dashboard in a few minutes.')
+          isDone = true
+        } else if (retryCount < 10) {
           setSseMessage(language === 'hi' ? 'सर्वर टाइमआउट हो गया, फिर से कोशिश कर रहा हूँ...' : 'Model timed out. Retrying generation...')
           setTimeout(() => handleCreateApp(retryCount + 1, currentAppId, rawCode, localChunkCount), 2000)
           return
+        } else {
+          setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
+          setBuildStage('error')
         }
-        setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
-        setBuildStage('error')
       }
 
       if (currentAppId && isDone) {
@@ -194,7 +203,14 @@ export default function BuilderPage() {
         }, 1500)
       }
     } catch (err: any) {
-      if (retryCount < 10) {
+      if (currentStage === 'deploying') {
+        setBuildStage('done')
+        setSseMessage(language === 'hi' ? 'कोड सफलतापूर्वक बन गया है। डिप्लॉयमेंट में समय लग रहा है। कृपया कुछ देर में डैशबोर्ड देखें।' : 'Code generated successfully! Vercel deployment is taking longer than expected. Please check your Dashboard in a few minutes.')
+        if (currentAppId) {
+          setTimeout(() => router.push(`/app/${currentAppId}`), 3000)
+        }
+        return
+      } else if (retryCount < 10) {
         setSseMessage(language === 'hi' ? 'कनेक्शन विफल, फिर से कोशिश कर रहा हूँ...' : 'Connection failed. Retrying generation...')
         setTimeout(() => handleCreateApp(retryCount + 1, currentAppId, rawCode, localChunkCount), 2000)
         return

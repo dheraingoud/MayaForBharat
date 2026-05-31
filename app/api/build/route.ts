@@ -156,32 +156,12 @@ export async function POST(request: Request) {
           }
           
           // It failed
-          if (deployAttempts > MAX_DEPLOY_RETRIES || !token || !previewDeployResult.deploymentId) {
-            throw new Error(`Preview build failed after ${MAX_DEPLOY_RETRIES} retries.`)
-          }
-          
-          sendEvent('progress', { message: `Vercel preview build failed (Attempt ${deployAttempts}/${MAX_DEPLOY_RETRIES}). Fetching compiler logs...` })
-          
+          // For Hackathons, we don't use DeepSeek to rewrite the code because it takes too long and hits the 300s limit.
+          // We will just throw the error so the user can fix it manually in the editor.
           const { getDeploymentLogs } = await import('@/lib/deploy')
-          const logs = await getDeploymentLogs(previewDeployResult.deploymentId, token)
+          const logs = await getDeploymentLogs(previewDeployResult.deploymentId || '', token || '')
           
-          sendEvent('progress', { message: 'Analyzing build errors and rewriting code...' })
-          
-          const { fixVercelBuildErrors } = await import('@/lib/voice-pipeline')
-          const newFiles = await fixVercelBuildErrors(filteredFiles, logs)
-          
-          sendEvent('progress', { message: 'Applying AI fixes and redeploying...' })
-          
-          // Update filteredFiles so the final builtApp has the updated code
-          filteredFiles.length = 0
-          filteredFiles.push(...newFiles)
-          
-          // Write updated files to disk for Vercel deploy
-          for (const file of filteredFiles) {
-            const filePath = path.join(buildDir, file.path)
-            await fs.mkdir(path.dirname(filePath), { recursive: true })
-            await fs.writeFile(filePath, file.content, 'utf-8')
-          }
+          throw new Error(`Vercel deployment failed. Check dashboard or logs: ${logs.slice(0, 500)}`)
         }
 
         sendEvent('progress', { message: 'Preview build passed. Promoting to Production...' })
