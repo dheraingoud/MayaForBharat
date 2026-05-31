@@ -75,7 +75,7 @@ export default function BuilderPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, mounted])
-  async function handleCreateApp(retryCount = 0) {
+  async function handleCreateApp(retryCount = 0, existingAppId?: string) {
     if (!spec || (buildStage !== 'idle' && retryCount === 0)) return
 
     setBuildError(null)
@@ -84,6 +84,9 @@ export default function BuilderPage() {
       setBuildStage('preparing')
       setSseMessage('Connecting to builder...')
     }
+
+    // Generate or reuse the appId
+    const currentAppId = existingAppId || crypto.randomUUID()
 
     try {
       // Remove spec from local storage immediately so a page refresh doesn't trigger a duplicate build
@@ -95,6 +98,7 @@ export default function BuilderPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          appId: currentAppId,
           spec: { ...spec, name: appName || spec.name, descriptionEn: appDescription || spec.descriptionEn },
         }),
       })
@@ -110,7 +114,6 @@ export default function BuilderPage() {
       if (!reader) throw new Error('No stream returned from build API')
       const decoder = new TextDecoder()
 
-      let currentAppId = ''
       let isDone = false
       let isError = false
       while (true) {
@@ -157,7 +160,7 @@ export default function BuilderPage() {
                 setBuildStage('done')
                 setBuiltAppId(data.appId)
                 setBuiltUrl(data.url)
-                currentAppId = data.appId
+                // App ID is already known
                 isDone = true
               }
             } catch (e) {
@@ -170,7 +173,7 @@ export default function BuilderPage() {
       if (!isDone && !isError) {
         if (retryCount < 2) {
           setSseMessage(language === 'hi' ? 'सर्वर टाइमआउट हो गया, फिर से कोशिश कर रहा हूँ...' : 'Model timed out. Retrying generation...')
-          setTimeout(() => handleCreateApp(retryCount + 1), 2000)
+          setTimeout(() => handleCreateApp(retryCount + 1, currentAppId), 2000)
           return
         }
         setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
@@ -185,7 +188,7 @@ export default function BuilderPage() {
     } catch (err: any) {
       if (retryCount < 2) {
         setSseMessage(language === 'hi' ? 'कनेक्शन विफल, फिर से कोशिश कर रहा हूँ...' : 'Connection failed. Retrying generation...')
-        setTimeout(() => handleCreateApp(retryCount + 1), 2000)
+        setTimeout(() => handleCreateApp(retryCount + 1, currentAppId), 2000)
         return
       }
       setBuildError(err.message || 'An unexpected error occurred')
