@@ -107,6 +107,7 @@ export default function BuilderPage() {
 
       let currentAppId = ''
       let isDone = false
+      let isError = false
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -146,6 +147,7 @@ export default function BuilderPage() {
               } else if (data.type === 'error') {
                 setBuildError(data.message || 'Build failed')
                 setBuildStage('error')
+                isError = true
               } else if (data.type === 'done') {
                 setBuildStage('done')
                 setBuiltAppId(data.appId)
@@ -160,7 +162,7 @@ export default function BuilderPage() {
         }
       }
 
-      if (!isDone && buildStage !== 'error') {
+      if (!isDone && !isError) {
         setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
         setBuildStage('error')
       }
