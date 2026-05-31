@@ -168,31 +168,7 @@ export default function BuilderPage() {
     }
   }
 
-  useEffect(() => {
-    setMounted(true)
-    // Load spec from localStorage if coming from /record
-    try {
-      const raw = localStorage.getItem('maya-app-spec')
-      if (raw) {
-        const s = JSON.parse(raw)
-        setSpec(s)
-        setAppName(s.name || '')
-        setAppDescription(s.descriptionEn || '')
-      } else {
-        // No spec → redirect to record page
-        router.replace('/record')
-      }
-    } catch {
-      router.replace('/record')
-    }
-  }, [router])
 
-  useEffect(() => {
-    if (spec && buildStage === 'idle' && mounted) {
-      handleCreateApp()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec, mounted])
 
   if (!mounted) return null
 
