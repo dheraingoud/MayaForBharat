@@ -173,7 +173,9 @@ function getDefaultBlueprint(category: string): { scale: string; files: string[]
 export async function buildApp(
   spec: AppSpec,
   onProgress?: (msg: string) => void,
-  useFallback: boolean = false
+  useFallback: boolean = false,
+  partialContent: string = '',
+  onChunk?: (text: string) => void
 ) {
   onProgress?.('spec_ready')
 
@@ -186,25 +188,33 @@ export async function buildApp(
 
   onProgress?.('building_code')
 
+  const messages: import('@/lib/nim-client').ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `Build app for: ${JSON.stringify(spec)}` }
+  ]
+
+  if (partialContent) {
+    messages.push({ role: 'assistant', content: partialContent })
+    messages.push({ role: 'user', content: 'Continue exactly where you left off, without repeating anything. Start immediately with the next character.' })
+  }
+
   let chunkCount = 0
   const result = await nimChat({
     model: useFallback ? FALLBACK_MODEL : MODELS.BUILDER,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Build app for: ${JSON.stringify(spec)}` }
-    ],
+    messages,
     maxTokensOverride: 16384,
     stream: true,
-    onChunk: () => {
+    onChunk: (text) => {
       chunkCount++
       if (chunkCount % 50 === 0) {
         onProgress?.(`generating... (${chunkCount} chunks)`)
       }
+      onChunk?.(text)
     }
   })
 
   onProgress?.('code_complete')
-  return result
+  return partialContent + result
 }
 
 // ─── Robust File Extractor ──────────────────────────────────────────────────────
@@ -238,7 +248,9 @@ export function robustParseFiles(raw: string): Array<{path: string, content: str
 
 export async function buildWithRetry(
   spec: AppSpec,
-  onProgress?: (step: string) => void
+  onProgress?: (step: string) => void,
+  partialContent: string = '',
+  onChunk?: (text: string) => void
 ): Promise<string | null> {
   let lastError = ''
 
@@ -248,7 +260,7 @@ export async function buildWithRetry(
       const useFallback = attempt > 0 // Attempt 0 = DeepSeek, Attempt 1/2 = GLM-5.1
 
       // Let nimChat handle the timeout (5 minutes internally)
-      let raw = await buildApp(spec, onProgress, useFallback)
+      let raw = await buildApp(spec, onProgress, useFallback, partialContent, onChunk)
 
       // Strip markdown code fences if model wrapped it
       raw = stripCodeFences(raw)

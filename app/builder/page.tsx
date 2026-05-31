@@ -75,7 +75,7 @@ export default function BuilderPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, mounted])
-  async function handleCreateApp(retryCount = 0, existingAppId?: string) {
+  async function handleCreateApp(retryCount = 0, existingAppId?: string, partialContent: string = '') {
     if (!spec || (buildStage !== 'idle' && retryCount === 0)) return
 
     setBuildError(null)
@@ -99,6 +99,7 @@ export default function BuilderPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           appId: currentAppId,
+          partialContent,
           spec: { ...spec, name: appName || spec.name, descriptionEn: appDescription || spec.descriptionEn },
         }),
       })
@@ -116,6 +117,8 @@ export default function BuilderPage() {
 
       let isDone = false
       let isError = false
+      let rawCode = partialContent
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -128,6 +131,8 @@ export default function BuilderPage() {
               const data = JSON.parse(line.slice(6))
               if (data.type === 'stage') {
                 setBuildStage(data.stage)
+              } else if (data.type === 'chunk') {
+                rawCode += data.text
               } else if (data.type === 'progress') {
                 if (data.message.includes('chunks')) {
                   const match = data.message.match(/generating\.\.\. \((\d+) chunks\)/)
@@ -173,7 +178,7 @@ export default function BuilderPage() {
       if (!isDone && !isError) {
         if (retryCount < 2) {
           setSseMessage(language === 'hi' ? 'सर्वर टाइमआउट हो गया, फिर से कोशिश कर रहा हूँ...' : 'Model timed out. Retrying generation...')
-          setTimeout(() => handleCreateApp(retryCount + 1, currentAppId), 2000)
+          setTimeout(() => handleCreateApp(retryCount + 1, currentAppId, rawCode), 2000)
           return
         }
         setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')

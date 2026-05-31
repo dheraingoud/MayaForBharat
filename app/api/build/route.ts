@@ -14,6 +14,7 @@ export async function POST(request: Request) {
   const body = await request.json()
   const spec: AppSpec = body.spec
   const appId: string = body.appId || crypto.randomUUID()
+  const partialContent: string = body.partialContent || ''
 
   if (!spec) {
     return NextResponse.json({ error: 'No spec provided' }, { status: 400 })
@@ -61,30 +62,37 @@ export async function POST(request: Request) {
         sendEvent('progress', { message: 'Initializing AI builder...' })
 
         // ── Pre-save App as "building" so it appears in Dashboard even if client disconnects ──
-        try {
-          await addApp({
-            id: appId,
-            name: spec.name,
-            nameHindi: spec.nameHindi,
-            descriptionEn: spec.descriptionEn,
-            category: spec.category,
-            url: '',
-            projectId: '',
-            createdAt: new Date().toISOString(),
-            status: 'building',
-            adminUsername: spec.adminUsername,
-            adminPin: spec.adminPin,
-            files: [],
-          })
-        } catch (e) {
-          console.warn('[api/build] Failed to pre-save app', e)
+        if (!partialContent) {
+          try {
+            await addApp({
+              id: appId,
+              name: spec.name,
+              nameHindi: spec.nameHindi,
+              descriptionEn: spec.descriptionEn,
+              category: spec.category,
+              url: '',
+              projectId: '',
+              createdAt: new Date().toISOString(),
+              status: 'building',
+              adminUsername: spec.adminUsername,
+              adminPin: spec.adminPin,
+              files: [],
+            })
+          } catch (e) {
+            console.warn('[api/build] Failed to pre-save app', e)
+          }
         }
 
         // Build the app
-        const raw = await buildWithRetry(spec, (step) => {
-          console.log(`[api/build] Progress: ${step}`)
-          sendEvent('progress', { message: step })
-        })
+        const raw = await buildWithRetry(
+          spec, 
+          (step) => {
+            console.log(`[api/build] Progress: ${step}`)
+            sendEvent('progress', { message: step })
+          },
+          partialContent,
+          (text) => sendEvent('chunk', { text })
+        )
 
         if (!raw) throw new Error('Build failed after retries')
 
