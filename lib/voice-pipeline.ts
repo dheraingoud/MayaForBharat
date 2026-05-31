@@ -3,16 +3,13 @@
  *
  * Pipeline: Browser MediaRecorder → Groq Whisper → NIM Intent → NIM Builder
  *
- * Uses caveman skill for compressed prompts → massive token savings.
- * All NIM calls via Chat Completions. No response_format on models that
- * don't support it — use prompt-level JSON enforcement instead.
+ * PERF: No PLANNER call. Deterministic blueprint from category.
+ * No skills injection in builder (saves ~5000 input tokens).
  */
 
 import Groq from 'groq-sdk'
 import { MODELS, FALLBACK_MODEL, nimChat } from './nim-client'
-import { getPromptTemplate } from './prompts/templates'
 import { buildBuilderSystemPrompt } from './prompts/builder-system'
-import { getSkillsForContext } from './skills'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +128,46 @@ Rules:
   return parseJSON<AppSpec>(raw, 'extractIntent')
 }
 
+// ─── Deterministic Architecture Blueprint ─────────────────────────────────────
+// Replaces the PLANNER LLM call that was consuming 120+ seconds.
+// The file list is derived from the business category — no model call needed.
+
+const CATEGORY_BLUEPRINTS: Record<string, { scale: string; files: string[] }> = {
+  kirana: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/stock/page.tsx', 'app/sales/page.tsx'],
+  },
+  tailor: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/orders/page.tsx', 'app/measurements/page.tsx'],
+  },
+  dairy: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/orders/page.tsx', 'app/customers/page.tsx'],
+  },
+  pharmacy: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/medicines/page.tsx', 'app/sales/page.tsx', 'app/expiry/page.tsx'],
+  },
+  electronics: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/inventory/page.tsx', 'app/repairs/page.tsx'],
+  },
+  restaurant: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/orders/page.tsx', 'app/menu/page.tsx', 'app/tables/page.tsx'],
+  },
+  other: {
+    scale: 'Medium',
+    files: ['app/layout.tsx', 'app/page.tsx', 'app/globals.css', 'app/inventory/page.tsx', 'app/sales/page.tsx'],
+  },
+}
+
+function getDefaultBlueprint(category: string): { scale: string; files: string[] } {
+  const key = category?.toLowerCase() || 'other'
+  return CATEGORY_BLUEPRINTS[key] || CATEGORY_BLUEPRINTS.other
+}
+
 // ─── Build App ────────────────────────────────────────────────────────────────
 
 export async function buildApp(
@@ -140,44 +177,12 @@ export async function buildApp(
 ) {
   onProgress?.('spec_ready')
 
-  // Load GitHub skills for builder context
-  const skills = await getSkillsForContext('builder').catch(() => '')
+  // Deterministic blueprint — no PLANNER model call needed (saves 120+ seconds)
+  const architectureBlueprint = getDefaultBlueprint(spec.category)
+  onProgress?.(`Architecture: ${architectureBlueprint.scale} scale (${architectureBlueprint.files.length} files)`)
 
-  // ─── Estimation / Planning Phase ──────────────────────────────────
-  onProgress?.('Estimating size: Planning architecture...')
-  
-  const plannerSystemPrompt = `You are a software architect. Your job is to read the application spec and define the exact list of files needed to build the app.
-Output ONLY a JSON object with this exact format:
-{
-  "scale": "Small" | "Medium" | "Large",
-  "files": ["app/layout.tsx", "app/page.tsx", "app/globals.css"]
-}
-Small = 1-3 files. Medium = 4-6 files. Large = 7+ files.
-Be extremely minimalist. Only include absolutely necessary files to satisfy the spec.`
-
-  let architectureBlueprint = { scale: "Medium", files: ["app/layout.tsx", "app/page.tsx", "app/globals.css"] }
-  try {
-    const planResult = await nimChat({
-      model: MODELS.PLANNER,
-      messages: [
-        { role: 'system', content: plannerSystemPrompt },
-        { role: 'user', content: `Spec: ${JSON.stringify(spec)}` }
-      ]
-    })
-    
-    // Extract JSON from planResult
-    const jsonMatch = planResult.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      architectureBlueprint = JSON.parse(jsonMatch[0])
-    }
-  } catch (e) {
-    console.warn('Planning phase failed, falling back to default blueprint', e)
-  }
-  
-  onProgress?.(`Estimating size: ${architectureBlueprint.scale} scale (${architectureBlueprint.files.length} pages)`)
-
-  // Use modular builder prompt (extracted to lib/prompts/builder-system.ts)
-  const systemPrompt = buildBuilderSystemPrompt({ spec, architectureBlueprint, skills })
+  // Build the system prompt (skills are NOT injected — they bloated input by ~5000 tokens)
+  const systemPrompt = buildBuilderSystemPrompt({ spec, architectureBlueprint })
 
   onProgress?.('building_code')
 

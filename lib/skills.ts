@@ -37,7 +37,7 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
       'https://raw.githubusercontent.com/JuliusBrussee/caveman/main/SKILL.md',
       'https://raw.githubusercontent.com/JuliusBrussee/caveman/main/README.md',
     ],
-    contexts: ['all'],
+    contexts: ['proposer', 'observer', 'evolution'], // Removed from 'all'/'builder' — builder prompt is already compressed
     compress: false, // already compressed
   },
   {
@@ -56,7 +56,7 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
       'https://raw.githubusercontent.com/obra/superpowers/main/skills/writing-plans/SKILL.md',
       'https://raw.githubusercontent.com/obra/superpowers/main/skills/writing-plans/skill.md',
     ],
-    contexts: ['builder', 'evolution'],
+    contexts: ['evolution'], // Removed from 'builder' — irrelevant to code generation
   },
   {
     name: 'using-git-worktrees',
@@ -65,7 +65,7 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
       'https://raw.githubusercontent.com/obra/superpowers/main/skills/using-git-worktrees/SKILL.md',
       'https://raw.githubusercontent.com/obra/superpowers/main/skills/using-git-worktrees/skill.md',
     ],
-    contexts: ['builder', 'evolution'],
+    contexts: ['evolution'], // Removed from 'builder' — irrelevant to code generation
   },
   {
     name: 'frontend-design',
@@ -196,9 +196,9 @@ export async function getSkillsForContext(
   for (const result of fetched) {
     if (result.status === 'fulfilled' && result.value.content) {
       const { def, content } = result.value
-      // Truncate very long skills to 4K chars to preserve context budget
-      const truncated = content.length > 4000
-        ? content.slice(0, 4000) + '\n... [truncated]'
+      // Truncate very long skills to 2K chars to preserve context budget
+      const truncated = content.length > 2000
+        ? content.slice(0, 2000) + '\n... [truncated]'
         : content
       results.push(`\n--- SKILL: ${def.name} ---\n${truncated}\n--- END SKILL ---`)
     }

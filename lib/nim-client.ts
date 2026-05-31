@@ -67,9 +67,9 @@ export const MODELS = {
   /** Step 3.7 Flash — THE code writer. High-IQ model for drafting the architecture blueprint */
   BUILDER: {
     id: 'stepfun-ai/step-3.7-flash',
-    maxTokens: 8192,
+    maxTokens: 16384,
     thinking: null,
-    temperature: 1,
+    temperature: 0.7,
     topP: 1,
     maxTools: 10,
   },
