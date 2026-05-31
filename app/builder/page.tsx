@@ -75,16 +75,21 @@ export default function BuilderPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, mounted])
-  async function handleCreateApp() {
-    if (!spec || buildStage !== 'idle') return
+  async function handleCreateApp(retryCount = 0) {
+    if (!spec || (buildStage !== 'idle' && retryCount === 0)) return
+
     setBuildError(null)
 
-    setBuildStage('preparing')
-    setSseMessage('Connecting to builder...')
+    if (retryCount === 0) {
+      setBuildStage('preparing')
+      setSseMessage('Connecting to builder...')
+    }
 
     try {
       // Remove spec from local storage immediately so a page refresh doesn't trigger a duplicate build
-      localStorage.removeItem('maya-app-spec')
+      if (retryCount === 0) {
+        localStorage.removeItem('maya-app-spec')
+      }
 
       const res = await fetch('/api/build', {
         method: 'POST',
@@ -163,17 +168,27 @@ export default function BuilderPage() {
       }
 
       if (!isDone && !isError) {
+        if (retryCount < 2) {
+          setSseMessage(language === 'hi' ? 'सर्वर टाइमआउट हो गया, फिर से कोशिश कर रहा हूँ...' : 'Model timed out. Retrying generation...')
+          setTimeout(() => handleCreateApp(retryCount + 1), 2000)
+          return
+        }
         setBuildError(language === 'hi' ? 'सर्वर कनेक्शन टूट गया। यह आमतौर पर एक टाइमआउट के कारण होता है। कृपया पुनः प्रयास करें।' : 'Server connection dropped unexpectedly (Timeout). The app may still finish building in the background.')
         setBuildStage('error')
       }
 
-      if (currentAppId) {
+      if (currentAppId && isDone) {
         setTimeout(() => {
           router.push(`/app/${currentAppId}`)
-        }, 2000)
+        }, 1500)
       }
-    } catch (e: unknown) {
-      setBuildError(e instanceof Error ? e.message : 'Unknown error')
+    } catch (err: any) {
+      if (retryCount < 2) {
+        setSseMessage(language === 'hi' ? 'कनेक्शन विफल, फिर से कोशिश कर रहा हूँ...' : 'Connection failed. Retrying generation...')
+        setTimeout(() => handleCreateApp(retryCount + 1), 2000)
+        return
+      }
+      setBuildError(err.message || 'An unexpected error occurred')
       setBuildStage('error')
     }
   }
@@ -363,7 +378,7 @@ export default function BuilderPage() {
                 id="build-trigger-btn"
                 whileHover={buildStage === 'idle' ? { scale: 1.05 } : {}}
                 whileTap={buildStage === 'idle' ? { scale: 0.95 } : {}}
-                onClick={buildStage === 'idle' ? handleCreateApp : buildStage === 'error' ? () => setBuildStage('idle') : undefined}
+                onClick={buildStage === 'idle' ? () => handleCreateApp(0) : buildStage === 'error' ? () => handleCreateApp(0) : undefined}
                 disabled={isBuilding && buildStage !== 'done'}
                 className={`flex items-center justify-center gap-3 px-8 py-4 rounded-full font-semibold transition-all shadow-lg disabled:opacity-60 ${
                   buildStage === 'done'
