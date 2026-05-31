@@ -20,7 +20,8 @@ const CORE_RULES = `RULES:
 - Use standard React hooks (useState, useEffect) for state. DO NOT use heavy libraries like zustand, framer-motion, recharts, gsap, or threejs.
 - Ensure all mandatory pages are built (e.g. Landing Page, Dashboard, and any core feature pages).
 - Self-contained inline components. NEVER import from files you didn't generate.
-- ALL UI TEXT: ENGLISH ONLY. No Hindi/Devanagari in the generated app UI.`
+- ALL UI TEXT: ENGLISH ONLY. No Hindi/Devanagari in the generated app UI.
+- CONCISENESS: Keep each file under 150 lines. No code comments. No verbose variable names. Compact JSX. Prefer ternaries over if/else blocks.`
 
 // ─── Design System ───────────────────────────────────────────────────────────
 
@@ -46,6 +47,8 @@ const COMPILATION_RULES = `BUILD RULES (CRITICAL):
 // ─── Output Format ───────────────────────────────────────────────────────────
 
 const OUTPUT_FORMAT = `OUTPUT: Return files in <maya-write path="path/to/file">...</maya-write> tags.
+CRITICAL: Output ONLY <maya-write> tags with code inside. ABSOLUTELY NO conversational text, reasoning, commentary, or explanations anywhere in your output. No "Let me", "Here is", "Wait", "Now I'll" etc.
+Use .tsx extension for any file containing JSX (e.g. lib/store.tsx NOT lib/store.ts).
 Example: <maya-write path="app/page.tsx">
 import { ... }
 export default function Page() { ... }

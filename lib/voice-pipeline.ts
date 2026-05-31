@@ -183,8 +183,8 @@ export async function buildApp(
   const architectureBlueprint = getDefaultBlueprint(spec.category)
   
   // Make sure we include lib/store.ts in every blueprint natively
-  if (!architectureBlueprint.files.includes('lib/store.ts')) {
-    architectureBlueprint.files.push('lib/store.ts')
+  if (!architectureBlueprint.files.includes('lib/store.tsx')) {
+    architectureBlueprint.files.push('lib/store.tsx')
   }
 
   onProgress?.(`Architecture: ${architectureBlueprint.scale} scale (${architectureBlueprint.files.length} files)`)
@@ -298,6 +298,15 @@ export async function buildWithRetry(
       // Strip markdown code fences if model wrapped it
       raw = raw.replace(/^```[a-z]*\n?/gm, '').replace(/```$/gm, '').trim()
 
+      // Strip <think>...</think> reasoning blocks
+      raw = raw.replace(/<think>[\s\S]*?<\/think>/g, '')
+
+      // Safety net: strip conversational text that leaked between </maya-write> and <maya-write> tags
+      // This catches "Wait let's adjust..." or "Got it, I'll continue..." injected on resume
+      raw = raw.replace(/<\/maya-write>([\s\S]*?)(<maya-write)/g, (_, between, next) => {
+        // Keep only whitespace between tags, strip any conversational text
+        return '</maya-write>\n' + next
+      })
 
       // Validate XML tags natively
       const { parseModelOutput } = await import('@/lib/tags')

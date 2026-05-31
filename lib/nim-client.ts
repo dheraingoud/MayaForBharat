@@ -692,11 +692,13 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
     } catch (e) {
       const partial = (e as any).partialContent as string | undefined
       if (partial && partial.length > 0 && resumeCount < MAX_RESUMES) {
-        totalContent += partial
+        // Strip <think>...</think> reasoning from content before using as context
+        const cleanPartial = partial.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+        totalContent += cleanPartial
         resumeCount++
         console.warn(`[nim] ⚠️ Stream interrupted. Resuming from partial content (${totalContent.length} chars) - attempt ${resumeCount}/${MAX_RESUMES}`)
         currentMessages.push({ role: 'assistant', content: totalContent })
-        currentMessages.push({ role: 'user', content: 'Continue exactly where you left off, do not repeat yourself.' })
+        currentMessages.push({ role: 'user', content: 'Continue generating code exactly where you left off. Output ONLY code. Do NOT output any conversational text, reasoning, or commentary like "Got it", "Wait", "Let me", "Here is", etc. Start with the exact next character of code.' })
         continue
       }
       throw e
