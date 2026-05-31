@@ -198,8 +198,28 @@ export async function buildApp(
   ]
 
   if (partialContent) {
-    messages.push({ role: 'assistant', content: partialContent })
-    messages.push({ role: 'user', content: 'Continue exactly where you left off. DO NOT output any conversational text like "Got it" or "Here is". Start immediately with the exact next character of the code.' })
+    // Instead of resuming mid-character (which causes the AI to inject conversational
+    // text like "Got it, let me continue..." directly into code), we keep only the
+    // fully completed <maya-write>...</maya-write> blocks and ask the model to generate
+    // the remaining files cleanly.
+    const { parseModelOutput } = await import('@/lib/tags')
+    const completedOps = parseModelOutput(partialContent)
+    const completedFiles = completedOps.filter(op => op.type === 'write').map(op => op.path)
+
+    if (completedFiles.length > 0) {
+      // Reconstruct clean partial from only fully parsed blocks
+      const cleanPartial = completedOps
+        .filter(op => op.type === 'write')
+        .map(op => `<maya-write path="${op.path}">\n${op.content}\n</maya-write>`)
+        .join('\n')
+
+      messages.push({ role: 'assistant', content: cleanPartial })
+      messages.push({
+        role: 'user',
+        content: `You have already generated these files: ${completedFiles.join(', ')}. Now generate ONLY the remaining files from the architecture. Start directly with <maya-write path="...">. Do NOT repeat any files listed above. No conversational text.`
+      })
+    }
+    // If no complete files were parsed, just start fresh (don't use partial at all)
   }
 
   let chunkCount = 0
@@ -214,7 +234,20 @@ export async function buildApp(
   })
 
   onProgress?.('code_complete')
-  return partialContent + result
+
+  // If we had completed files from partial, combine them cleanly
+  if (partialContent) {
+    const { parseModelOutput } = await import('@/lib/tags')
+    const completedOps = parseModelOutput(partialContent)
+    if (completedOps.length > 0) {
+      const cleanPartial = completedOps
+        .filter(op => op.type === 'write')
+        .map(op => `<maya-write path="${op.path}">\n${op.content}\n</maya-write>`)
+        .join('\n')
+      return cleanPartial + '\n' + result
+    }
+  }
+  return result
 }
 
 // ─── Robust File Extractor ──────────────────────────────────────────────────────
@@ -378,14 +411,23 @@ export function sanitizeFiles(files: Array<{ path: string; content: string }>): 
     return true
   }).map(f => {
     let content = f.content
+    let filePath = f.path
     
     // --- POST-PROCESSING SANITIZER ---
+    // Fix: .ts files containing JSX must be renamed to .tsx (Turbopack cannot parse JSX in .ts)
+    if (filePath.endsWith('.ts') && !filePath.endsWith('.d.ts')) {
+      const hasJSX = /<[A-Z][a-zA-Z]*[\s/>]/.test(content) || /<\/[A-Z]/.test(content)
+      if (hasJSX) {
+        filePath = filePath.replace(/\.ts$/, '.tsx')
+      }
+    }
+
     // Fix: Unquoted `use client;` which causes JS syntax errors
     if (/^\s*use client\s*;?/m.test(content)) {
       content = content.replace(/^\s*use client\s*;?/m, '"use client";')
     }
 
-    return { ...f, content }
+    return { path: filePath, content }
   })
 }
 
