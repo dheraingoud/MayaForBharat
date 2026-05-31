@@ -240,8 +240,8 @@ export async function POST(request: Request) {
         const { initAppMemory } = await import('@/lib/memory/autoDream')
         await initAppMemory(buildDir, spec.name, spec.descriptionEn, '').catch(e => console.warn('[api/build] initAppMemory warning:', e))
         
-        // Disabled automatic evolution loop as requested by the user
-        // _triggerInitialImprovements(appId, spec, deployResult.url).catch(e => console.warn('[api/build] initial improvements warning:', e))
+        // Trigger initial background improvements
+        _triggerInitialImprovements(appId, spec, deployResult.url).catch(e => console.warn('[api/build] initial improvements warning:', e))
 
         sendEvent('done', { appId, url: deployResult.url })
         controller.close()

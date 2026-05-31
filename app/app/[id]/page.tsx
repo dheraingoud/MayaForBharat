@@ -73,8 +73,13 @@ export default function AppDetailPage() {
           messages: found.messages || [],
         })
         
-        // Start polling the Vercel URL
-        if (found.url) {
+        // Start polling the Vercel URL if live, or poll the DB if still building
+        if (found.status === 'building') {
+          // Poll the database until it's live
+          setTimeout(() => {
+            if (mounted) fetchApp()
+          }, 5000)
+        } else if (found.url) {
           checkVercelUrl(found.url)
         }
 
@@ -87,6 +92,7 @@ export default function AppDetailPage() {
     } catch (e) {
       console.error(e)
     } finally {
+      // Only disable loading state if we have the app (it might still be 'deploying' in iframe though)
       setLoading(false)
     }
   }
