@@ -155,13 +155,26 @@ export async function POST(request: Request) {
             break // Success!
           }
           
-          // It failed
-          // For Hackathons, we don't use DeepSeek to rewrite the code because it takes too long and hits the 300s limit.
-          // We will just throw the error so the user can fix it manually in the editor.
+          // Fast auto-fixer for compiler/lucide errors using Stepfun
           const { getDeploymentLogs } = await import('@/lib/deploy')
           const logs = await getDeploymentLogs(previewDeployResult.deploymentId || '', token || '')
           
-          throw new Error(`Vercel deployment failed. Check dashboard or logs: ${logs.slice(0, 500)}`)
+          sendEvent('progress', { message: 'Compiler error detected. Fast AI auto-fixing...' })
+          const { fixVercelBuildErrors } = await import('@/lib/voice-pipeline')
+          const newFiles = await fixVercelBuildErrors(filteredFiles, logs)
+          
+          // Update filteredFiles so the final builtApp has the updated code
+          filteredFiles.length = 0
+          filteredFiles.push(...newFiles)
+          
+          // Write updated files to disk for next Vercel deploy attempt
+          for (const file of filteredFiles) {
+            const filePath = path.join(buildDir, file.path)
+            await fs.mkdir(path.dirname(filePath), { recursive: true })
+            await fs.writeFile(filePath, file.content, 'utf-8')
+          }
+          
+          continue // loop around and deploy again!
         }
 
         sendEvent('progress', { message: 'Preview build passed. Promoting to Production...' })

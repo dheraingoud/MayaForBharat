@@ -146,12 +146,12 @@ export const MODELS = {
     maxTools: 15,
   },
 
-  /** DeepSeek V4 Flash — Fix router. Writer that fixes build/test failures */
+  /** Stepfun Fast — Fix router. Fast writer that fixes build/test failures */
   FIX_ROUTER: {
-    id: 'deepseek-ai/deepseek-v4-flash',
-    maxTokens: 10000,
-    thinking: { thinking: true, reasoning_effort: 'high' },
-    temperature: 1,
+    id: 'stepfun-ai/step-3.7-flash',
+    maxTokens: 8192,
+    thinking: null,
+    temperature: 0.8,
     topP: 0.95,
     maxTools: 25,
   },
