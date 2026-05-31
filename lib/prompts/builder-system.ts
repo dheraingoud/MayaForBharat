@@ -42,7 +42,8 @@ const COMPILATION_RULES = `BUILD RULES (CRITICAL):
 2. import { useRouter } from 'next/navigation' — NEVER next/router.
 3. Only import icons you ACTUALLY render. No unused imports.
 4. Every page.tsx/layout.tsx: export default function.
-5. Next.js 15: params are Promises → const { id } = await params;`
+5. Next.js 15: params are Promises → const { id } = await params;
+6. TURBOPACK STRICT MODE: DO NOT use complex nested template literals with inline CSS (like \`bg-[hsl(...)]\`) in classNames. Use standard Tailwind utility classes instead.`
 
 // ─── Output Format ───────────────────────────────────────────────────────────
 

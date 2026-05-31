@@ -506,7 +506,8 @@ RULES:
 - Do NOT return files that do not have compiler errors.
 - Return the ENTIRE file content for the files you fix.
 - Ensure all variables and imports exist.
-- Provide no other markdown outside the tags.`
+- Provide no other markdown outside the tags.
+- TURBOPACK STRICT MODE: If the error is "Expected a semicolon" or "Expected '}'" around a className template literal, you MUST simplify the template literal. Do NOT use inline styles like \`bg-[hsl(...)]\` in classNames. Use standard Tailwind utilities or separate style props.`
 
   const filesContext = files.map(f => `--- ${f.path} ---\n${f.content}`).join('\n\n')
   
