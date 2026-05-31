@@ -302,7 +302,7 @@ export async function deployToVercel({
       commitMessage: `deploy: ${uniqueProjectName}`,
     },
     framework: 'nextjs',
-    target, // 'production' or 'preview'
+    target: target === 'preview' ? 'staging' : target,
   }
 
   const deployRes = await fetch(`${VERCEL_API}/v13/deployments`, {

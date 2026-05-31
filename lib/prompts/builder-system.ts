@@ -17,8 +17,8 @@ import type { AppSpec } from '../voice-pipeline'
 
 const CORE_RULES = `RULES:
 - TypeScript, Next.js 15 App Router, Tailwind CSS, lucide-react icons.
-- MANDATORY LIBRARIES: zustand (for global state), framer-motion (for all animations), recharts (for dashboards).
-- OPTIONAL LIBRARIES (for heroes/landing pages): gsap. Use three, @react-three/fiber, @react-three/drei ONLY if explicitly mentioned by the user.
+- Use standard React hooks (useState, useEffect) for state. DO NOT use heavy libraries like zustand, framer-motion, recharts, gsap, or threejs.
+- Ensure all mandatory pages are built (e.g. Landing Page, Dashboard, and any core feature pages).
 - Self-contained inline components. NEVER import from files you didn't generate.
 - ALL UI TEXT: ENGLISH ONLY. No Hindi/Devanagari in the generated app UI.`
 
@@ -29,9 +29,9 @@ const DESIGN_SYSTEM = `DESIGN (CRITICAL):
 - ALWAYS use semantic tokens: bg-background, text-foreground, bg-primary. Define these in globals.css using HSL.
 - Create ambitious, premium aesthetics (Glassmorphism, Neomorphism, or Minimalist, Brutalism, water glass design).
 - Create rich design tokens in globals.css (e.g. --gradient-primary, --shadow-elegant).
-- Use framer-motion for micro-interactions (hover: scale, tap: scale) and page transitions.
+- Use Tailwind CSS group-hover and transition utilities for micro-interactions (hover: scale, active: scale).
 - Cards: bg-background/70 backdrop-blur-xl border border-white/20 shadow-2xl (Glassmorphism preferred).
-- Generate a stunning landing page (app/page.tsx) with a highly animated hero section (framer-motion).
+- Generate a stunning landing page (app/page.tsx) with a highly styled hero section.
 - lucide-react for icons. NO emojis. NO placeholder grey boxes. Generate UI that wows.`
 
 // ─── Compilation Rules ───────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ const QUALITY_GATES = `QUALITY:
 - No "Lorem ipsum". Write real contextual copy.
 - No TS errors. Loading states (skeleton shimmer). Form validation.
 - Mobile-first (390px). Semantic HTML. Look like a funded startup landing page.
-- FUNCTIONAL APP: MUST generate a \`lib/store.ts\` using Zustand to manage global state.
+- FUNCTIONAL APP: Manage global state using React Context or standard hooks.
 - NAVIGATION: \`app/layout.tsx\` MUST include a top-level Navigation bar linking to all generated pages.`
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
