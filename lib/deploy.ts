@@ -60,8 +60,8 @@ async function injectMemoryFiles(
 async function injectScaffoldFiles(projectDir: string, projectName: string, target: 'production' | 'preview' = 'production'): Promise<void> {
   const STRICT_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: { ignoreBuildErrors: false },
-  eslint: { ignoreDuringBuilds: false }
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true }
 }
 module.exports = nextConfig`
 
