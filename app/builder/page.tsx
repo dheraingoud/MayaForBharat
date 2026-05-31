@@ -91,6 +91,7 @@ export default function BuilderPage() {
 
     let rawCode = partialContent
     let localChunkCount = startChunkCount
+    let currentStage = 'preparing'
 
     try {
       // Remove spec from local storage immediately so a page refresh doesn't trigger a duplicate build
@@ -121,7 +122,6 @@ export default function BuilderPage() {
 
       let isDone = false
       let isError = false
-      let currentStage = 'preparing'
 
       while (true) {
         const { done, value } = await reader.read()
