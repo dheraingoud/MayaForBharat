@@ -11,7 +11,7 @@ export function parseModelOutput(output: string): FileOperation[] {
   const operations: FileOperation[] = []
   
   // Regex to match <maya-write path="...">...</maya-write>
-  const writeRegex = /<maya-write\s+path="([^"]+)">\n([\s\S]*?)<\/maya-write>/g
+  const writeRegex = /<maya-write\s+path=["']([^"']+)["'][^>]*>\s*([\s\S]*?)<\/maya-write>/g
   let match
   
   while ((match = writeRegex.exec(output)) !== null) {

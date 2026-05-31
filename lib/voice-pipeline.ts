@@ -252,6 +252,9 @@ export async function buildWithRetry(
 
       // Strip markdown code fences if model wrapped it
       raw = stripCodeFences(raw)
+      
+      // Strip any <think> tags (including unclosed ones) so they don't corrupt the XML parser
+      raw = raw.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '')
 
       // Validate XML tags natively
       const { parseModelOutput } = await import('@/lib/tags')
