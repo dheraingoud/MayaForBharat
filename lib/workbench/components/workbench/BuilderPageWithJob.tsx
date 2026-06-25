@@ -19,6 +19,8 @@ import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { generateId } from 'ai';
 import { toast } from 'react-toastify';
+
+const BUILD_CANCEL_KEY = 'Escape';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
 import { description as chatDescriptionAtom } from '@/lib/workbench/persistence';
 import { useGenerateJob } from '@/lib/workbench/hooks/useGenerateJob';
@@ -110,6 +112,39 @@ export function BuilderPageWithJob({
         toast.error(`Could not start build: ${e.message}`);
       });
   }, [appId, prompt, model, provider, job.isReady, job._id, job.status, createJob]);
+
+  // ── 1.5 Esc key on the document cancels an in-flight build (v0-ish).
+  //        Cleaned up on unmount.
+  useEffect(() => {
+    if (job.status !== 'building' && job.status !== 'pending') return;
+    if (!job._id) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== BUILD_CANCEL_KEY) return;
+      // Don't intercept if the user is editing a text input.
+      const t = e.target as HTMLElement | null;
+      const tag = (t?.tagName ?? '').toLowerCase();
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        (t?.isContentEditable ?? false)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      cancelJob(job._id as string)
+        .then((r) => {
+          if ('ok' in r && r.ok) {
+            toast('Build cancelled', { type: 'info', autoClose: 2000 });
+          }
+        })
+        .catch(() => {
+          // Already-cancelled or stale; silent.
+        });
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [job.status, job._id, cancelJob]);
 
   // ── 2. When the row reaches `live`, write the files into the WebContainer
   //      exactly once. After that, hand off to <BuilderPage>.
