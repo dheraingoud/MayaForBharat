@@ -1,24 +1,16 @@
-// @ts-nocheck — Convex action callbacks can pick up jobId from scratch + _setBuilding/saveProgress/markLive/markError are all imported via internal.
 // generateJobs.ts — Public + internal Convex API for detached app generation.
 // Mirrors the split used by evolutionRun.ts / autoApprove.ts / autoDream.ts:
-//   - this file defines the API surface and wires scheduler runs.
-//   - generateJobsHandler.ts contains the heavy logic (LLM streaming, parsing, sweeper).
+//   - this file defines the schema-bound query + mutation surface and wires
+//     scheduler.runAfter to the worker.
+//   - generateJobsHandler.ts owns the worker ENTRIES (internalAction) plus the
+//     heavy handler bodies (LLM streaming + parsing + sweeper). It declares
+//     "use node" because streamText transitively pulls in node-only modules.
 //
-// Public surface (callable from client):
-//   createJob      — submit a generation job and spawn the worker via scheduler.runAfter(0, ...)
-//   getByAppId     — read the latest job for an appId (used by useQuery in the browser)
-//   get            — read a specific job by _id
-//   cancelJob      — flip status to 'cancelled' (the worker honors this between progress saves)
-//
-// Internal surface (used by the worker and other actions):
-//   _get                     — read a row by _id
-//   _setBuilding             — flip status pending -> building
-//   _listBuildingOlderThan   — used by sweepStale to find stale 'building' jobs
-//   saveProgress             — partialText + progressNote updates
-//   markLive                 — final state with filesJson, also writes apps.fileTree
-//   markError                — sets status='error', error message
-//   generateRun              — internalAction that calls generateJobsHandler
-//   sweepStale               — internalAction that calls sweepStaleHandler
+// Naming note: actions / methods on this file are referenced as
+// `internal.generateJobs.<name>` from client-facing mutations; the worker
+// actions themselves are `internal.generateJobsHandler.<name>Action`.
+
+// @ts-nocheck — Convex api/filterByIndex union types for the `apps` table are wider than we need here.
 
 import {
   mutation,
@@ -26,14 +18,8 @@ import {
   internalMutation,
   internalQuery,
 } from "./_generated/server";
-import { internal } from "./_generated/api";
-import { v } from "convex/values";
-
-// NOTE: This file contains the schema-bound public/internal query + mutation
-// surface. The two *actions* (generateRun, sweepStale) live in generateJobsActions.ts
-// under a `"use node"` directive — Convex requires any file that imports Node-only
-// modules (the LLM wrapper transitively pulls node:crypto from one of the providers)
-// to declare node mode and contain only actions.
+import { internal } from './_generated/api';
+import { v } from 'convex/values';
 
 // ─── Public mutations / queries ──────────────────────────────────────────────
 
@@ -92,19 +78,35 @@ export const getByAppId = query({
       .collect();
     if (rows.length === 0) return null;
 
-    // Tie-break: prefer live, then building/pending, then error, then cancelled.
-    const priority = ["live", "building", "pending", "error", "cancelled"];
+    // Tie-break:
+    //   1. status priority (live > building/pending > error > cancelled)
+    //   2. within the same priority: older createdAt wins for stable states
+    //      ('live', 'error', 'cancelled'); newer createdAt wins for transient
+    //      states ('building', 'pending'). Stable wins ensure the browser keeps
+    //      showing the most recent *final* build; transient keeps progress visible.
+    const priority = ['live', 'building', 'pending', 'error', 'cancelled'];
+    const newnessWinsStatus: Record<string, boolean> = {
+      building: true,
+      pending: true,
+    };
     let best: typeof rows[number] | null = null;
     let bestPrio = -1;
+    let bestScore = -Infinity;
     for (const r of rows) {
       const p = priority.indexOf(r.status);
-      // Tie-break by recency when same status — older wins for stable states ('live', 'error', 'cancelled'),
-      // newer wins for transient states ('building', 'pending').
-      const transient = r.status === "building" || r.status === "pending";
-      const newerWins = transient;
-      if (p > bestPrio || (p === bestPrio && newerWins)) {
+      const prefersNewer = !!newnessWinsStatus[r.status] ? 1 : -1;
+      // Score: priority × 10^9 + recency (older rows have larger createdAt delta).
+      // Tie when status-priority is equal; recency signed by prefersNewer.
+      let score: number;
+      if (p !== bestPrio) {
+        score = p * 1e12;
+      } else {
+        score = prefersNewer * r.createdAt;
+      }
+      if (best === null || score > bestScore) {
         best = r;
         bestPrio = p;
+        bestScore = score;
       }
     }
     if (!best) return null;

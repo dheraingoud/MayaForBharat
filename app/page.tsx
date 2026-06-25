@@ -396,14 +396,16 @@ export default function LandingPage() {
         const data = await r.json()
         if (data && typeof data.appId === 'string') appId = data.appId
       } else {
-        console.warn('[approvae] apps-from-plan failed', r.status)
+        console.warn('[approve] apps-from-plan failed', r.status)
       }
     } catch (e) {
       console.warn('[approve] apps-from-plan error', e)
     }
 
     const params = new URLSearchParams()
-    if (appId) params.set('appId', appId)
+    // NOTE: appId is NOT put in the query string. /workbench/[id]/page.tsx
+    // reads the appId from the URL path segment, not from a query param;
+    // adding `?appId=` would be dead URL noise.
     params.set('prompt', submittedPromptStr)
     if (planName) params.set('name', planName)
     params.set('model', activeTier.model)

@@ -51,16 +51,48 @@ Rules:
 
 function extractJsonObject(text: string): any | null {
   if (!text) return null;
-  // Strip <think>...</think> reasoning blocks if present.
-  const stripped = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  // Find the first balanced {...} at top-level if it exists.
-  const m = stripped.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]);
-  } catch {
-    return null;
+  // Strip /* reasoning-style */ blocks if present (used by several NIM models).
+  const stripped = text
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .replace(/```json\s*[\s\S]*?```/g, '')
+    .trim();
+  // Anchor on the FIRST `{` after any leading prose: walk forward, tracking
+  // string boundaries so we don't get confused by `{` inside literal strings
+  // or nested braces. Bail out if the candidate doesn't fully parse.
+  const start = stripped.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        const candidate = stripped.slice(start, i + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch {
+          return null;
+        }
+      }
+    }
   }
+  return null;
 }
 
 export async function POST(req: NextRequest) {

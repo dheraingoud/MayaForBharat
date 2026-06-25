@@ -32,8 +32,11 @@ function cleanContent(raw: string): string {
   // Markdown code-fence cleanup (mirror StreamingMessageParser.cleanoutMarkdownSyntax)
   const fenceMatch = s.match(/^\s*```\w*\n([\s\S]*?)\n\s*```\s*$/);
   if (fenceMatch) s = fenceMatch[1];
-  // Decoded entities (mirror StreamingMessageParser.cleanEscapedTags)
-  s = s.replace(/</g, '<').replace(/>/g, '>').replace(/&/g, '&');
+  // NOTE: We intentionally do NOT decode HTML entities here. The regex only
+  // matches when both `<boltAction>` and `</boltAction>` are present, so the
+  // inner content arrives as plain text already; the message-parser.ts upstream
+  // does its own escaping. Adding an entity-decode pass risks double-decoding
+  // when content legitimately contains `&` characters.
   return s.trim() + '\n';
 }
 

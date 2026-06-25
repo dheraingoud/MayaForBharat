@@ -31,6 +31,12 @@ export function useCreateGenerateJob() {
       if (!args.prompt || !args.prompt.trim()) {
         throw new Error('useCreateGenerateJob: prompt is required');
       }
+      if (!args.model || !args.model.trim()) {
+        throw new Error('useCreateGenerateJob: model is required');
+      }
+      if (!args.provider || !args.provider.trim()) {
+        throw new Error('useCreateGenerateJob: provider is required');
+      }
 
       const jobId = await createJob({
         appId: args.appId,

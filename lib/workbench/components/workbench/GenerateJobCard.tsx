@@ -47,11 +47,11 @@ function fmtElapsed(s: number): string {
 function StatusLabel(s: GenerateJobStatus): string {
   switch (s) {
     case 'pending':
-      return 'Queued — waiting for worker';
+      return 'Queued. waiting for worker';
     case 'building':
       return 'Building your app';
     case 'live':
-      return 'Ready — opening workspace';
+      return 'Ready. opening workspace';
     case 'error':
       return 'Build failed';
     case 'cancelled':
