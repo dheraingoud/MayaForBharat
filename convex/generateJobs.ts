@@ -25,11 +25,15 @@ import {
   query,
   internalMutation,
   internalQuery,
-  internalAction,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { generateJobsHandler, sweepStaleHandler } from "./generateJobsHandler";
+
+// NOTE: This file contains the schema-bound public/internal query + mutation
+// surface. The two *actions* (generateRun, sweepStale) live in generateJobsActions.ts
+// under a `"use node"` directive — Convex requires any file that imports Node-only
+// modules (the LLM wrapper transitively pulls node:crypto from one of the providers)
+// to declare node mode and contain only actions.
 
 // ─── Public mutations / queries ──────────────────────────────────────────────
 
@@ -73,7 +77,7 @@ export const createJob = mutation({
     });
 
     // Spawn the detached worker. runAfter(0) runs "next tick" — outside the request lifecycle.
-    await ctx.scheduler.runAfter(0, internal.generateJobs.generateRun, { jobId: _id });
+    await ctx.scheduler.runAfter(0, internal.generateJobsHandler.generateRunAction, { jobId: _id });
 
     return { jobId: _id };
   },
@@ -276,16 +280,5 @@ export const markError = internalMutation({
   },
 });
 
-export const generateRun = internalAction({
-  args: { jobId: v.id("generateJobs") },
-  handler: async (ctx, args) => {
-    return await generateJobsHandler(ctx, { jobId: args.jobId as any });
-  },
-});
-
-export const sweepStale = internalAction({
-  args: {},
-  handler: async (ctx) => {
-    return await sweepStaleHandler(ctx);
-  },
-});
+// generateRun + sweepStale actions live in `convex/generateJobsActions.ts`
+// under `"use node"` (needed because streamText transitively imports node:crypto).

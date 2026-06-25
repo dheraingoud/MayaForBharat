@@ -20,7 +20,7 @@ if (isDemoMode) {
   // Demo: health check every 5 minutes
   crons.cron("maya-healthcheck-demo", "*/5 * * * *", internal.healthCheck.healthCheck)
   // Demo: stale gen-job sweeper every 1 minute
-  crons.cron("maya-genjobs-sweep-demo", "*/1 * * * *", internal.generateJobs.sweepStale)
+  crons.cron("maya-genjobs-sweep-demo", "*/1 * * * *", internal.generateJobsHandler.sweepStaleAction)
 } else {
   // Production: KAIROS daemon — 2am IST (8:30pm UTC)
   crons.cron("maya-kairos", "30 20 * * *", internal.evolutionRun.evolutionRun)
@@ -31,7 +31,7 @@ if (isDemoMode) {
   // Production: Health check + auto-rollback every 15 minutes
   crons.cron("maya-healthcheck", "*/15 * * * *", internal.healthCheck.healthCheck)
   // Production: stale gen-job sweeper every 1 minute
-  crons.cron("maya-genjobs-sweep", "*/1 * * * *", internal.generateJobs.sweepStale)
+  crons.cron("maya-genjobs-sweep", "*/1 * * * *", internal.generateJobsHandler.sweepStaleAction)
 }
 
 export default crons

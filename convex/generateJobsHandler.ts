@@ -1,10 +1,14 @@
+"use node";
+//
 // generateJobsHandler.ts — Heavy logic for the detached generation feature.
 //
 // Two exported handlers:
 //   generateJobsHandler — invoked by internal.generateJobs.generateRun (the worker).
-//     Task 2 ships a SKELETON that does not call an LLM yet; it produces a hardcoded
-//     pair of files (README.md + package.json) and calls markLive. Task 4 replaces
-//     this body with the real AI SDK v6 streaming call.
+//     Task 4: drives AI SDK v6 streamText() from lib/workbench/llm/stream-text.ts
+//     against the NIM router using env-injected API keys. Periodically parses
+//     partialText via extractBoltFiles() and saves progress. On finish parses
+//     the final text and calls markLive({jobId, files}). Cancels cleanly via
+//     a control-flag thrown error caught by the catch arm.
 //   sweepStaleHandler — invoked by internal.generateJobs.sweepStale (cron every 1 min).
 //     Marks any 'building' job older than 2 minutes as 'error' (no progress for 2 min).
 //
@@ -12,71 +16,168 @@
 //   _get, _setBuilding, saveProgress, markLive, markError, _listBuildingOlderThan
 
 import { internal } from "./_generated/api";
+import { streamText } from "../lib/workbench/llm/stream-text";
+import { extractBoltFiles } from "../lib/workbench/llm/extract-bolt-files";
 
 // @ts-nocheck — Convex internalAction ctx is loosely typed; matches the convention
 // used by convex/evolutionRunHandler.ts and convex/autoApproveHandler.ts.
 const TWO_MIN_MS = 2 * 60 * 1000;
+const CANCEL_CHECK_INTERVAL_MS = 7_000;
+const SAVE_EVERY_MS = 3_000;
+const SAVE_EVERY_CHARS = 4_000;
+
+class Cancelled extends Error {
+  __cancelled = true as const;
+  constructor() {
+    super('cancelled');
+  }
+}
+
+function readNimApiKey(): string {
+  return (
+    process.env.NIM_API_KEY ||
+    process.env.NVIDIA_NIM_API_KEY ||
+    process.env.API_KEY_NVIDIANIM ||
+    ''
+  );
+}
 
 /**
  * Worker entry — runs detached (Convex action), independent of any HTTP request.
- * Task 2 ships a placeholder that produces deterministic dummy files for smoke-testing
- * the schema + sweeper + Convex realtime propagation without spending LLM tokens.
- * Task 4 (see plan section 4) replaces the body of this function with the real
- * AI SDK v6 streamText() call that builds the actual app.
+ * Streams the LLM response, periodically persists progress + parsed file count,
+ * honors `cancelled` between progress saves, and writes the final file array
+ * to the generateJobs row + the apps.fileTree on completion.
  */
-export async function generateJobsHandler(ctx: any, { jobId }: { jobId: any }): Promise<{
-  ok: boolean;
-  files?: number;
-  cancelled?: boolean;
-}> {
+export async function generateJobsHandler(
+  ctx: any,
+  { jobId }: { jobId: any },
+): Promise<{ ok: boolean; files?: number; cancelled?: boolean }> {
   const job = await ctx.runQuery(internal.generateJobs._get, { jobId });
   if (!job) return { ok: false };
-  if (job.status === "cancelled") {
+  if (job.status === 'cancelled') {
     return { ok: false, cancelled: true };
   }
-  if (job.status === "live" || job.status === "error") {
+  if (job.status === 'live' || job.status === 'error') {
     // Idempotent: another path already brought this to completion.
     return { ok: true };
   }
 
   await ctx.runMutation(internal.generateJobs._setBuilding, { jobId });
 
-  try {
+  // Pre-flight: refuse to spend LLM tokens if env is misconfigured.
+  const nimKey = readNimApiKey();
+  if (!nimKey) {
+    await ctx.runMutation(internal.generateJobs.markError, {
+      jobId,
+      error: 'Missing LLM config (NIM_API_KEY not set in Convex env)',
+    });
+    return { ok: false };
+  }
+  const apiKeys: Record<string, string> = { NvidiaNIM: nimKey };
+  const providerSettings: Record<string, any> = {
+    NvidiaNIM: { enabled: true },
+  };
+
+  let partialText = '';
+  let lastSaveAt = Date.now();
+  let lastSaveLen = 0;
+  let lastCancelCheck = Date.now();
+  let parsedFiles: Array<{ path: string; content: string }> = [];
+  let didMark = false;
+
+  const checkCancel = async () => {
+    const fresh = await ctx.runQuery(internal.generateJobs._get, { jobId });
+    if (fresh?.status === 'cancelled') throw new Cancelled();
+  };
+
+  const saveProgressNow = async (note: string) => {
     await ctx.runMutation(internal.generateJobs.saveProgress, {
       jobId,
-      partialText: "",
-      progressNote: "starting (skeleton) — Task 4 will fill",
+      partialText,
+      progressNote: note,
+    });
+  };
+
+  try {
+    await streamText({
+      messages: [
+        {
+          role: 'user',
+          parts: [{ type: 'text' as const, text: job.prompt }],
+          content: job.prompt,
+        } as any,
+      ],
+      env: process.env as Record<string, string>,
+      apiKeys,
+      providerSettings,
+      promptId: 'default',
+      chatMode: 'build',
+      designScheme: undefined,
+      files: {},
+      options: {
+        // AI SDK v6: chunk events. We persist text-delta only; reasoning/tool
+        // deltas are intentionally skipped from partialText (those go through
+        // a separate UI channel).
+        onChunk: async ({ chunk }: { chunk: { type: string; text?: string } }) => {
+          if (
+            chunk?.type === 'text-delta' &&
+            typeof chunk.text === 'string'
+          ) {
+            partialText += chunk.text;
+          }
+          const now = Date.now();
+          if (
+            partialText.length - lastSaveLen > SAVE_EVERY_CHARS ||
+            now - lastSaveAt > SAVE_EVERY_MS
+          ) {
+            parsedFiles = extractBoltFiles(partialText);
+            await saveProgressNow(
+              `Streaming — ${parsedFiles.length} file${parsedFiles.length === 1 ? '' : 's'} detected`,
+            );
+            lastSaveAt = now;
+            lastSaveLen = partialText.length;
+          }
+          if (now - lastCancelCheck > CANCEL_CHECK_INTERVAL_MS) {
+            lastCancelCheck = now;
+            await checkCancel();
+          }
+        },
+        onError: async () => {
+          // The error is re-thrown by streamText; final markError is in the catch arm.
+        },
+        onFinish: async (event: { text?: string }) => {
+          const finalText: string = event?.text ?? partialText;
+          parsedFiles = extractBoltFiles(finalText, true);
+          await ctx.runMutation(internal.generateJobs.markLive, {
+            jobId,
+            files: parsedFiles,
+          });
+          didMark = true;
+        },
+      } as any,
     });
 
-    // ----------------------------------------------------------------------
-    // TASK 2 SKELETON — replaced in Task 4 with streamText() + extractBoltFiles
-    // ----------------------------------------------------------------------
-    const files = [
-      {
-        path: "README.md",
-        content:
-          "# MAYA-generated app\n\nSkeleton build (Task 2). The full implementation lands in Task 4 with a live LLM call.\n",
-      },
-      {
-        path: "package.json",
-        content: JSON.stringify({ name: "maya-app", version: "0.0.1", private: true }, null, 2) + "\n",
-      },
-    ];
-
-    await ctx.runMutation(internal.generateJobs.markLive, { jobId, files });
-    return { ok: true, files: files.length };
+    // Belt-and-braces: if onFinish didn't fire (rare), derive final from partial.
+    if (!didMark) {
+      const fallback = extractBoltFiles(partialText, true);
+      await ctx.runMutation(internal.generateJobs.markLive, {
+        jobId,
+        files: fallback,
+      });
+    }
+    return { ok: true, files: parsedFiles.length };
   } catch (e: any) {
-    if (e && typeof e === "object" && e.__cancelled) {
+    if (e instanceof Cancelled || e?.__cancelled) {
       await ctx.runMutation(internal.generateJobs.markError, {
         jobId,
-        error: "cancelled",
+        error: 'cancelled',
       });
       return { ok: false, cancelled: true };
     }
     await ctx.runMutation(internal.generateJobs.markError, {
       jobId,
       error:
-        typeof e?.message === "string"
+        typeof e?.message === 'string'
           ? e.message
           : String(e?.message ?? e),
     });
@@ -114,3 +215,22 @@ export async function sweepStaleHandler(ctx: any): Promise<{ swept: number }> {
 
 // Re-export the constants for tests
 export const __testing = { TWO_MIN_MS };
+
+// ─── Action wrappers (live here because this file has "use node") ─────────────
+
+import { internalAction } from "./_generated/server";
+import { v } from "convex/values";
+
+export const generateRunAction = internalAction({
+  args: { jobId: v.id("generateJobs") },
+  handler: async (ctx, args) => {
+    return await generateJobsHandler(ctx, { jobId: args.jobId as any });
+  },
+});
+
+export const sweepStaleAction = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    return await sweepStaleHandler(ctx);
+  },
+});
