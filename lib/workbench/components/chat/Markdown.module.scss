@@ -1,0 +1,296 @@
+$font-mono: ui-monospace, 'Fira Code', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+$code-font-size: 12px;
+
+@mixin not-inside-actions {
+  &:not(:has(:global(.actions)), :global(.actions *)) {
+    @content;
+  }
+}
+
+.MarkdownContent {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--bolt-elements-textPrimary);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+
+  > *:not(:last-child) {
+    margin-block-end: 8px;
+  }
+
+  :global(.artifact) {
+    margin: 0.5em 0;
+  }
+
+  // ─── Headings ─────────────────────────────────────────────
+  :is(h1, h2, h3, h4, h5, h6) {
+    @include not-inside-actions {
+      margin-block-start: 14px;
+      margin-block-end: 6px;
+      font-weight: 700;
+      line-height: 1.3;
+      color: var(--bolt-elements-textPrimary);
+    }
+  }
+
+  h1 {
+    font-size: 1.25em;
+    font-weight: 800;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding-bottom: 6px;
+    margin-block-end: 10px;
+  }
+
+  h2 {
+    font-size: 1.1em;
+    font-weight: 700;
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  h3 {
+    font-size: 1em;
+    font-weight: 600;
+    color: #E8601A;
+  }
+
+  h4 {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: rgba(232, 96, 26, 0.8);
+  }
+
+  h5 {
+    font-size: 0.875em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--bolt-elements-textTertiary);
+  }
+
+  h6 {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: var(--bolt-elements-textTertiary);
+  }
+
+  // ─── Paragraphs ───────────────────────────────────────────
+  p {
+    white-space: pre-wrap;
+    margin-block-start: 0;
+    margin-block-end: 0;
+
+    &:not(:last-of-type) {
+      margin-block-end: 8px;
+    }
+  }
+
+  // ─── Links ────────────────────────────────────────────────
+  a {
+    color: #E8601A;
+    text-decoration: none;
+    cursor: pointer;
+    font-weight: 500;
+
+    &:hover {
+      text-decoration: underline;
+      color: #C94E12;
+    }
+  }
+
+  // ─── Inline code ──────────────────────────────────────────
+  :not(pre) > code {
+    font-family: $font-mono;
+    font-size: $code-font-size;
+
+    @include not-inside-actions {
+      border-radius: 5px;
+      padding: 0.15em 0.4em;
+      background-color: rgba(255,255,255,0.06);
+      color: #E8601A;
+      border: 1px solid rgba(255,255,255,0.08);
+      font-weight: 500;
+    }
+  }
+
+  // ─── Code blocks ──────────────────────────────────────────
+  pre {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #161616;
+    border: 1px solid rgba(255,255,255,0.06);
+    overflow-x: auto;
+    margin: 8px 0;
+
+    // Subtle left accent bar
+    border-left: 3px solid rgba(232,96,26,0.3);
+  }
+
+  pre:has(> code) {
+    font-family: $font-mono;
+    font-size: $code-font-size;
+    background: #161616;
+    overflow-x: auto;
+    min-width: 0;
+  }
+
+  // ─── Blockquotes (callout boxes) ──────────────────────────
+  blockquote {
+    margin: 8px 0;
+    padding: 10px 14px;
+    color: var(--bolt-elements-textSecondary);
+    border-left: 3px solid #E8601A;
+    background: rgba(232,96,26,0.04);
+    border-radius: 0 8px 8px 0;
+    font-size: 0.92em;
+
+    p {
+      margin: 0;
+    }
+  }
+
+  // ─── Lists ────────────────────────────────────────────────
+  :is(ul, ol) {
+    @include not-inside-actions {
+      padding-left: 1.4em;
+      margin-block-start: 4px;
+      margin-block-end: 8px;
+    }
+  }
+
+  ul {
+    @include not-inside-actions {
+      list-style-type: disc;
+    }
+
+    // Nested lists
+    ul {
+      list-style-type: circle;
+    }
+  }
+
+  ol {
+    @include not-inside-actions {
+      list-style-type: decimal;
+    }
+  }
+
+  li {
+    @include not-inside-actions {
+      & + li {
+        margin-block-start: 3px;
+      }
+
+      > *:not(:last-child) {
+        margin-block-end: 4px;
+      }
+
+      // Checkboxes (task lists from GFM)
+      &:has(input[type="checkbox"]) {
+        list-style: none;
+        margin-left: -1.2em;
+      }
+    }
+  }
+
+  // ─── Images ───────────────────────────────────────────────
+  img {
+    max-width: 100%;
+    box-sizing: border-box;
+    border-radius: 8px;
+    margin: 4px 0;
+  }
+
+  // ─── Horizontal rules ─────────────────────────────────────
+  hr {
+    height: 1px;
+    padding: 0;
+    margin: 14px 0;
+    background: linear-gradient(to right, transparent, rgba(255,255,255,0.1), transparent);
+    border: 0;
+  }
+
+  // ─── Tables ───────────────────────────────────────────────
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    font-size: 0.88em;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+
+    th {
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.85em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #E8601A;
+      background: rgba(232,96,26,0.06);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    td {
+      padding: 6px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:nth-child(2n) {
+      background-color: rgba(255,255,255,0.02);
+    }
+  }
+
+  // ─── Strong / Bold ────────────────────────────────────────
+  strong {
+    font-weight: 600;
+    color: var(--bolt-elements-textPrimary);
+  }
+
+  // ─── Emphasis ─────────────────────────────────────────────
+  em {
+    color: var(--bolt-elements-textSecondary);
+    font-style: italic;
+  }
+
+  // ─── Details / Summary ────────────────────────────────────
+  details {
+    margin: 8px 0;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    overflow: hidden;
+
+    summary {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.92em;
+      background: rgba(255,255,255,0.03);
+      user-select: none;
+
+      &:hover {
+        background: rgba(255,255,255,0.05);
+      }
+    }
+
+    > *:not(summary) {
+      padding: 0 12px 8px;
+    }
+  }
+
+  // ─── Keyboard shortcuts ───────────────────────────────────
+  kbd {
+    font-family: $font-mono;
+    font-size: 0.8em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  }
+}

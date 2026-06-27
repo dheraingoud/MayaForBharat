@@ -26,7 +26,8 @@ export default defineSchema({
       v.literal("preview"),
       v.literal("live"),
       v.literal("evolving"),
-      v.literal("error")
+      v.literal("error"),
+      v.literal("deployed")
     ),
     deploymentId: v.optional(v.string()),
     templateFamily: v.optional(v.union(

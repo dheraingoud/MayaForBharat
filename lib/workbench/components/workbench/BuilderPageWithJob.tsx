@@ -150,16 +150,24 @@ export function BuilderPageWithJob({
   //      exactly once. After that, hand off to <BuilderPage>.
   useEffect(() => {
     if (job.status !== 'live') return;
+
+    // Empty live (model produced no file actions) is NOT an error — the model
+    // either finished an empty response (probably network glitch) or
+    // returned only text. Just nudge the user with a toast; do NOT set the
+    // alert state, because the chat alert renders as a Terminal Error modal
+    // regardless of type for non-error sources by mistake. Keep `alert`
+    // cleared so the workbench is fully usable.
     if (!job.files || job.files.length === 0) {
-      // Empty live (model produced no file actions) — show empty success state.
-      workbenchStore.alert.set({
-        type: 'warning',
-        title: 'No files generated',
-        description: 'The model finished without emitting any file blocks.',
-        content: '',
-        source: 'chat',
-      } as any);
-      toast.warn('Build finished with no files — try a more specific prompt.');
+      try {
+        // Best-effort: clear any modal that may have been set elsewhere so
+        // the workbench doesn't get stuck showing a Terminal Error card.
+        workbenchStore.actionAlert.set(undefined);
+      } catch {
+        /* ignore */
+      }
+      toast.warn('Model returned no files. Try a more specific prompt or retry.', {
+        toastId: 'no-files',
+      });
       return;
     }
     const tag = `${job._id ?? ''}:${job.files.length}`;

@@ -1,14 +1,20 @@
+// @ts-nocheck
 /**
- * MAYA NIM Client — 3-key rotation + model registry + claude-proxy patterns
+ * MAYA NIM Client — 3-key rotation + 2-model architecture + claude-proxy patterns
  *
  * All agents use NIM Chat Completions via https://integrate.api.nvidia.com/v1
  *
+ * MODEL ARCHITECTURE (2 models):
+ * - step-3.7-flash: CODE WRITER — builds, plans, fixes code. Fast, high output.
+ * - minimax-m3: JUDGE — verifies, proposes, observes, consolidates memory. Multimodal.
+ * - llama-3.3-70b: INTENT — Hindi voice extraction only.
+ *
  * Patterns ported from claude-proxy (providers/nvidia_nim/request.py):
- * - chat_template_kwargs for reasoning (DeepSeek V4: reasoning_effort, others: enable_thinking)
- * - TPM trimming per model (Kimi max 15 tools, DeepSeek max 25)
+ * - chat_template_kwargs for reasoning (M3: thinking_mode, step: none)
+ * - TPM trimming per model
  * - Tool parameter aliasing for NIM safety (reserved param names like "type")
  * - Boolean JSON Schema subschema sanitization
- * - Fallback routing: primary → GLM-5.1 on specific failures
+ * - Fallback routing: step-3.7-flash → M3 on failure
  * - Retry-on-timeout with reduced reasoning_budget
  * - Retry-on-400 stripping reasoning_budget/chat_template/reasoning_content
  */
@@ -64,7 +70,10 @@ export type ModelConfig = {
 }
 
 export const MODELS = {
-  /** Step 3.7 Flash — THE code writer. High-IQ model for drafting the architecture blueprint */
+  // ── CODE WRITER (step-3.7-flash) ─────────────────────────────────────────
+  // Fast, high-output code generator. All code-writing tasks use this model.
+
+  /** Primary code writer — generates full Next.js apps */
   BUILDER: {
     id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 16384,
@@ -74,7 +83,7 @@ export const MODELS = {
     maxTools: 10,
   },
 
-  /** Step 3.7 Flash — Fast, high-IQ model for drafting the architecture blueprint */
+  /** Architecture planner — drafts file lists and app structure */
   PLANNER: {
     id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 4096,
@@ -84,39 +93,17 @@ export const MODELS = {
     maxTools: 10,
   },
 
-  /** Kimi K2.6 — Proposer. Reasons about what to improve */
-  PROPOSER: {
-    id: 'moonshotai/kimi-k2.6',
-    maxTokens: 4096,
-    thinking: { thinking: true },
-    temperature: 1,
-    topP: 1,
-    maxTools: 15,
-  },
-
-  /** GLM-5.1 — Memory consolidation (autoDream). Reliable for structured JSON.
-   *  High token budget so the model can deeply reason about cross-cycle patterns. */
-  AUTO_DREAM: {
-    id: 'z-ai/glm-5.1',
-    maxTokens: 16384,
-    thinking: { enable_thinking: true, clear_thinking: false },
-    temperature: 0.7,
-    topP: 0.9,
+  /** Fix router — patches build/test failures */
+  FIX_ROUTER: {
+    id: 'stepfun-ai/step-3.7-flash',
+    maxTokens: 8192,
+    thinking: null,
+    temperature: 0.8,
+    topP: 0.95,
     maxTools: 25,
   },
 
-  /** Llama 4 Maverick 17B — ONLY used for intent extraction from Hindi voice.
-   *  Strong Hindi NLP, large context window, reliable structured JSON output. */
-  INTENT: {
-    id: 'meta/llama-3.3-70b-instruct',
-    maxTokens: 4096,
-    thinking: null, // Llama 3.3 does not use reasoning kwargs
-    temperature: 0.5,
-    topP: 0.9,
-    maxTools: 20,
-  },
-
-  /** Step 3.7 Flash — DOM / structural analysis. Fast, accurate, no vision needed here */
+  /** DOM observer — structural analysis of generated apps */
   OBSERVER_DOM: {
     id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 4096,
@@ -126,60 +113,86 @@ export const MODELS = {
     maxTools: 25,
   },
 
-  /** Step 3.7 Flash — Multimodal screenshot / vision analysis. Fast vision at low cost */
-  OBSERVER_VISUAL: {
-    id: 'stepfun-ai/step-3.7-flash',
+  // ── JUDGE / REASONER (MiniMax M3) ────────────────────────────────────────
+  // Multimodal, strong reasoning. Evaluates, proposes, verifies — never writes code.
+  // Uses adaptive thinking: model decides when to reason deeply.
+
+  /** Visual verifier — SKEPTICAL reviewer of screenshots. NEVER the same model that wrote the code. */
+  VERIFIER: {
+    id: 'minimaxai/minimax-m3',
     maxTokens: 8192,
-    thinking: null,
+    thinking: { thinking_mode: 'adaptive' },
+    temperature: 0.7,
+    topP: 0.95,
+    maxTools: 25,
+  },
+
+  /** Proposer — reasons about what improvements to make */
+  PROPOSER: {
+    id: 'minimaxai/minimax-m3',
+    maxTokens: 4096,
+    thinking: { thinking_mode: 'adaptive' },
     temperature: 1,
     topP: 0.95,
     maxTools: 25,
   },
 
-  /** Step 3.7 Flash — Multimodal QA and UI verification. Fast screenshot-based testing */
-  TESTER: {
-    id: 'stepfun-ai/step-3.7-flash',
+  /** Visual observer — multimodal screenshot analysis */
+  OBSERVER_VISUAL: {
+    id: 'minimaxai/minimax-m3',
     maxTokens: 8192,
-    thinking: null,
-    temperature: 1,
-    topP: 0.95,
-    maxTools: 15,
-  },
-
-  /** Stepfun Fast — Fix router. Fast writer that fixes build/test failures */
-  FIX_ROUTER: {
-    id: 'stepfun-ai/step-3.7-flash',
-    maxTokens: 8192,
-    thinking: null,
+    thinking: { thinking_mode: 'adaptive' },
     temperature: 0.8,
     topP: 0.95,
     maxTools: 25,
   },
+
+  /** Memory consolidation — autoDream cross-cycle pattern analysis */
+  AUTO_DREAM: {
+    id: 'minimaxai/minimax-m3',
+    maxTokens: 8192,
+    thinking: { thinking_mode: 'enabled' },
+    temperature: 0.7,
+    topP: 0.9,
+    maxTools: 25,
+  },
+
+  /** Multimodal QA — UI testing and verification */
+  TESTER: {
+    id: 'minimaxai/minimax-m3',
+    maxTokens: 8192,
+    thinking: { thinking_mode: 'adaptive' },
+    temperature: 0.8,
+    topP: 0.95,
+    maxTools: 25,
+  },
+
+  // ── INTENT (Hindi voice) ─────────────────────────────────────────────────
+
+  /** Llama 3.3 70B — Hindi intent extraction from voice transcription */
+  INTENT: {
+    id: 'meta/llama-3.3-70b-instruct',
+    maxTokens: 4096,
+    thinking: null,
+    temperature: 0.5,
+    topP: 0.9,
+    maxTools: 20,
+  },
 } as const satisfies Record<string, ModelConfig>
 
-/** Fallback model used when primary model fails */
+/** Fallback model — MiniMax M3 with forced reasoning */
 export const FALLBACK_MODEL: ModelConfig = {
-  id: 'deepseek-ai/deepseek-v4-flash',
-  maxTokens: 10000,
-  thinking: { thinking: true, reasoning_effort: 'high' },
-  temperature: 1,
+  id: 'minimaxai/minimax-m3',
+  maxTokens: 8192,
+  thinking: { thinking_mode: 'enabled' },
+  temperature: 0.8,
   topP: 0.95,
   maxTools: 25,
 }
 
-/** Stepfun-specific fallback: if step-3.7-flash fails, try Llama then GLM */
-const STEPFUN_FALLBACK: ModelConfig = {
-  id: 'z-ai/glm-5.1',
-  maxTokens: 16384,
-  thinking: { enable_thinking: true, clear_thinking: false },
-  temperature: 0.8,
-  topP: 1,
-  maxTools: 25,
-}
-
-/** Model-specific fallback chain. If a model ID matches a key, try those fallbacks in order before the global FALLBACK_MODEL. */
+/** Model-specific fallback chains. step-3.7-flash falls back to M3, M3 has no further fallback. */
 const MODEL_FALLBACK_CHAINS: Record<string, ModelConfig[]> = {
-  'stepfun-ai/step-3.7-flash': [STEPFUN_FALLBACK, FALLBACK_MODEL],
+  'stepfun-ai/step-3.7-flash': [FALLBACK_MODEL],
 }
 
 export type ModelKey = keyof typeof MODELS
@@ -403,6 +416,8 @@ export interface NimChatOptions {
   onChunk?: (text: string) => void
   /** When true, fallback to GLM-5.1 on failure */
   allowFallback?: boolean
+  /** When true, don't wrap reasoning_content in <think> tags (for builder model where reasoning IS the output) */
+  skipThinkWrap?: boolean
 }
 
 // 10 minutes timeout — NIM models need time for large generations (Next.js full app)
@@ -627,13 +642,14 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
         })
         let thisChunkContent = ''
         let finishReason: any = null
+        const wrapThink = !options.skipThinkWrap
         let hasStartedReasoning = false
         let hasFinishedReasoning = false
         try {
           for await (const chunk of streamRes) {
             const reasoning = chunk.choices[0]?.delta?.reasoning_content || chunk.choices[0]?.delta?.reasoning || ''
             if (reasoning) {
-              if (!hasStartedReasoning) {
+              if (!hasStartedReasoning && wrapThink) {
                 thisChunkContent += '<think>\n'
                 hasStartedReasoning = true
               }
@@ -643,7 +659,7 @@ async function _doNimChat(options: _DoNimChatOptions): Promise<string> {
 
             const content = chunk.choices[0]?.delta?.content || ''
             if (content) {
-              if (hasStartedReasoning && !hasFinishedReasoning) {
+              if (hasStartedReasoning && !hasFinishedReasoning && wrapThink) {
                 thisChunkContent += '\n</think>\n'
                 hasFinishedReasoning = true
               }
@@ -740,6 +756,85 @@ export async function nimChatJSON<T = unknown>(
   } catch {
     throw new Error(`[nim] Invalid JSON from ${options.model.id}: ${raw.slice(0, 300)}`)
   }
+}
+
+// ─── SSE Streaming (NexaStudio pattern) ──────────────────────────────────────
+// Returns a ReadableStream of SSE events for browser-compatible streaming.
+// Used when NIM models are selected in the workbench chat UI.
+
+export interface NimStreamOptions {
+  model: ModelConfig
+  messages: ChatMessage[]
+  maxTokensOverride?: number
+  tools?: unknown[]
+}
+
+/**
+ * Stream NIM chat completions as a ReadableStream.
+ * Returns an SSE-compatible stream that can be returned directly from Next.js route handlers.
+ * Pattern ported from NexaStudio's generateStream + bolt.diy's toTextStreamResponse.
+ */
+export function nimChatStream(options: NimStreamOptions): ReadableStream<Uint8Array> {
+  const { model, messages, maxTokensOverride, tools } = options
+  const encoder = new TextEncoder()
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        await nimCallWithRetry(async (client) => {
+          const params: Record<string, unknown> = {
+            model: model.id,
+            messages,
+            max_tokens: maxTokensOverride ?? model.maxTokens,
+            temperature: model.temperature ?? 1,
+            top_p: model.topP ?? 1,
+            stream: true,
+          }
+
+          if (model.thinking) {
+            params.chat_template_kwargs = model.thinking
+          }
+
+          let processedTools = trimToolsForModel(tools, model)
+          processedTools = sanitizeNimToolSchemas(processedTools)
+          processedTools = aliasToolParameters(processedTools)
+          if (processedTools && processedTools.length > 0) {
+            params.tools = processedTools
+          }
+
+          const streamRes: any = await client.chat.completions.create({
+            ...params as any,
+            stream: true,
+          })
+
+          for await (const chunk of streamRes) {
+            const content = chunk.choices[0]?.delta?.content || ''
+            const reasoning = chunk.choices[0]?.delta?.reasoning_content || chunk.choices[0]?.delta?.reasoning || ''
+
+            if (reasoning) {
+              // Emit reasoning as a special SSE event
+              controller.enqueue(encoder.encode(`0:${JSON.stringify(reasoning)}\n`))
+            }
+            if (content) {
+              // Emit content as AI SDK text stream format
+              controller.enqueue(encoder.encode(`0:${JSON.stringify(content)}\n`))
+            }
+
+            if (chunk.choices[0]?.finish_reason) {
+              // Emit finish event
+              controller.enqueue(encoder.encode(`d:{"finishReason":"${chunk.choices[0].finish_reason}"}\n`))
+            }
+          }
+        })
+      } catch (e: any) {
+        // Emit error event
+        const errorMsg = e.message || 'NIM streaming failed'
+        controller.enqueue(encoder.encode(`3:${JSON.stringify(errorMsg)}\n`))
+      } finally {
+        controller.close()
+      }
+    },
+  })
 }
 
 // ─── Vision (Kimi K2.6 multimodal) ────────────────────────────────────────────

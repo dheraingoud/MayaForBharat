@@ -2,17 +2,18 @@
 //
 // useGenerateJob — reactive subscription to a generateJobs row for the workbench.
 //
-// Uses Convex realtime via `useQuery`. Returns the latest known state of the
-// generation job (status, files, error, progressNote) so the workbench UI can
-// render the right view: building card / live mount / error retry / cancelled.
+// Uses Convex's `useQuery_experimental` so the call returns the discriminated
+// {status: 'pending'|'success'|'error'} union instead of throwing. Errors never
+// bubble to the React error boundary (which would render /app/error.tsx and make
+// the whole /workbench/[id] page look like a hard crash / 404). On 'error' we
+// surface a synthetic "preparing" view the workbench can recover from.
 //
-// Returns `isReady=false` while the subscription hasn't returned yet (first
-// render after hydration). Once `isReady=true`, `status` is always defined —
-// even if no row exists yet (we surface "pending" and the caller can choose
-// to call useCreateGenerateJob to seed the row).
+// Returns the parsed GenerateJobView shape; downstream UI (GenerateJobCard /
+// BuilderPageWithJob) doesn't change because the shape is identical.
 //
 
-import { useQuery } from 'convex/react';
+import { useQuery_experimental as useQuery } from 'convex/react';
+import type { FunctionReference, FunctionArgs } from 'convex/server';
 import { api } from '@/convex/_generated/api';
 
 export type GenerateJobStatus =
@@ -28,19 +29,22 @@ export interface ParsedFile {
 }
 
 export interface GenerateJobView {
-  _id?: any;
+  _id?: string | null;
   status: GenerateJobStatus;
   files: ParsedFile[] | null;
   error: string | null;
   progressNote: string | null;
-  appId?: string;
+  appId?: string | null;
   transientJob: {
-    _id: any;
+    _id: string;
     status: GenerateJobStatus;
     progressNote: string | null;
     createdAt: number;
   } | null;
+  /** Subscription hasn't returned a value yet — first hydration render. */
   isReady: boolean;
+  /** Convex threw; consumers can surface this in a non-fatal banner. */
+  queryError: string | null;
 }
 
 const EMPTY: GenerateJobView = {
@@ -48,52 +52,74 @@ const EMPTY: GenerateJobView = {
   files: null,
   error: null,
   progressNote: null,
-  transientJob: null,
+  transientJob:null,
   isReady: true,
+  queryError: null,
 };
 
-export function useGenerateJob(appId: string | null | undefined): GenerateJobView {
-  const job = useQuery(
-    api.generateJobs.getByAppId,
-    appId ? { appId } : 'skip',
-  );
+function decodeFiles(filesJson: unknown): ParsedFile[] | null {
+  if (typeof filesJson !== 'string' || filesJson.length === 0) return null;
+  try {
+    const parsed = JSON.parse(filesJson);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (f) =>
+        f != null &&
+        typeof f.path === 'string' &&
+        typeof f.content === 'string',
+    );
+  } catch {
+    return null;
+  }
+}
 
-  // First render: still subscribing
-  if (job === undefined) {
+export function useGenerateJob(
+  appId: string | null | undefined,
+): GenerateJobView {
+  type Q = typeof api.generateJobs.getByAppId;
+  const result = useQuery<Q>({
+    query: api.generateJobs.getByAppId as Q & FunctionReference<'query'>,
+    args:
+      appId
+        ? ({ appId } as unknown as FunctionArgs<Q>)
+        : ('skip' as const),
+  });
+
+  // Subscription hasn't returned yet → render the loading state.
+  if (result.status === 'pending') {
     return { ...EMPTY, isReady: false };
   }
 
-  // No rows yet
-  if (job === null) {
-    return EMPTY;
+  // Convex errored (function not deployed, schema drift, transient network).
+  // Surface as a non-fatal "preparing" view so the React tree stays alive.
+  if (result.status === 'error') {
+    return {
+      ...EMPTY,
+      isReady: true,
+      queryError: String((result as any).error?.message ?? result),
+      progressNote: 'Connecting to build service…',
+    };
   }
 
-  // We got a row — decode filesJson defensively
-  let files: ParsedFile[] | null = null;
-  if (typeof job.filesJson === 'string' && job.filesJson.length > 0) {
-    try {
-      const parsed = JSON.parse(job.filesJson);
-      if (Array.isArray(parsed)) {
-        files = parsed.filter(
-          (f) =>
-            f != null &&
-            typeof f.path === 'string' &&
-            typeof f.content === 'string',
-        );
-      }
-    } catch {
-      files = null;
-    }
-  }
+  // Success but no row exists for this appId yet.
+  const row = (result as any).data as
+    | (Record<string, unknown> & { filesJson?: string | null })
+    | null
+    | undefined;
+  if (!row) return EMPTY;
 
   return {
-    _id: (job as any)._id ?? null,
-    appId: (job as any).appId,
-    status: (job as any).status as GenerateJobStatus,
-    files,
-    error: (job as any).error ?? null,
-    progressNote: (job as any).progressNote ?? null,
-    transientJob: (job as any).transientJob ?? null,
+    _id: (row._id as string | undefined) ?? null,
+    appId: (row.appId as string | undefined) ?? null,
+    status: (row.status as GenerateJobStatus) ?? 'pending',
+    files: decodeFiles(row.filesJson),
+    error: (row.error as string | null | undefined) ?? null,
+    progressNote: (row.progressNote as string | null | undefined) ?? null,
+    transientJob: (row.transientJob as GenerateJobView['transientJob']) ?? null,
     isReady: true,
+    queryError: null,
   };
 }
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _UnusedFnRef = FunctionReference<'query'>;

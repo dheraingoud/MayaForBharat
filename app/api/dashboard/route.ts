@@ -66,6 +66,10 @@ export async function GET() {
       projectId: app.projectId,
       descriptionEn: app.descriptionEn,
       createdAt: app.createdAt,
+      adminUsername: app.adminUsername,
+      adminPin: app.adminPin,
+      shownToOwner: app.shownToOwner,
+      messages: app.messages || [],
     }
   }))
 

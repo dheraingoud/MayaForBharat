@@ -75,10 +75,13 @@ export const create = mutation({
     ),
     status: v.optional(v.union(
       v.literal("building"),
+      v.literal("preview"),
       v.literal("live"),
       v.literal("evolving"),
-      v.literal("error")
+      v.literal("error"),
+      v.literal("deployed")
     )),
+    deploymentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Check if app already exists
@@ -110,6 +113,7 @@ export const update = mutation({
     id: v.id("apps"),
     status: v.optional(v.string()),
     vercelUrl: v.optional(v.string()),
+    deploymentId: v.optional(v.string()),
     evolutionCount: v.optional(v.number()),
     lastEvolvedAt: v.optional(v.number()),
     shownToOwner: v.optional(v.boolean()),
@@ -130,6 +134,7 @@ export const update = mutation({
     if (args.evolutionCount !== undefined) updates.evolutionCount = args.evolutionCount
     if (args.lastEvolvedAt) updates.lastEvolvedAt = args.lastEvolvedAt
     if (args.shownToOwner !== undefined) updates.shownToOwner = args.shownToOwner
+    if (args.deploymentId) updates.deploymentId = args.deploymentId
     if (args.messages !== undefined) updates.messages = args.messages
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(args.id, updates)

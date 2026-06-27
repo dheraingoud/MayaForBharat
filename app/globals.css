@@ -1,14 +1,18 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import './workbench.css';
+@import '../lib/workbench/styles/builder-overrides.css';
+@import './icons.css';
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-sora: var(--font-sora);
-  --font-dm-sans: var(--font-dm-sans);
-  --font-jetbrains-mono: var(--font-jetbrains-mono);
-  
-  /* MAYA Color Palette */
+  /* ─── Typography ──────────────────────────────────────── */
+  --font-display: var(--font-outfit);
+  --font-sans: var(--font-dm-sans);
+  --font-mono: var(--font-jetbrains-mono);
+
+  /* ─── MAYA Color Palette ──────────────────────────────── */
   --bg-primary: #F5F4F0;
   --bg-secondary: #FFFFFF;
   --bg-tertiary: #EFEDE8;
@@ -20,28 +24,215 @@
   --accent-hover: #C94E12;
   --accent-soft: #FDF0E8;
   --dark-bg: #1A1917;
+  --dark-surface: #2A2925;
   --success-green: #2D7A4F;
   --warning-amber: #B45309;
   --error-red: #C0392B;
+
+  /* ─── Double-Bezel (Doppelrand) Architecture ──────────── */
+  --bezel-radius-outer: 2rem;
+  --bezel-radius-inner: calc(2rem - 0.375rem);
+  --bezel-padding: 0.375rem;
+  --bezel-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.05);
+  --bezel-shadow-hover: 0 24px 48px -12px rgba(0, 0, 0, 0.08);
+  --bezel-border-light: rgba(0, 0, 0, 0.05);
+  --bezel-border-dark: rgba(255, 255, 255, 0.08);
+  --bezel-inner-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.15);
+
+  /* ─── Premium Easing Curves ───────────────────────────── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-premium: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* ─── Z-Index Layer System ────────────────────────────── */
+  --z-base: 0;
+  --z-above: 10;
+  --z-sticky: 30;
+  --z-nav: 40;
+  --z-modal-backdrop: 45;
+  --z-modal: 50;
+  --z-overlay: 60;
+  --z-tooltip: 70;
+
+  /* ─── Transition Durations ────────────────────────────── */
+  --duration-fast: 200ms;
+  --duration-normal: 400ms;
+  --duration-slow: 700ms;
+  --duration-reveal: 800ms;
 }
 
 @theme inline {
   --font-sans: var(--font-dm-sans);
-  --font-display: var(--font-sora);
+  --font-display: var(--font-outfit);
   --font-mono: var(--font-jetbrains-mono);
+
+  /* ─── Bolt Workbench Color Tokens (from CSS vars) ──── */
+  --color-bolt-elements-borderColor: var(--bolt-elements-borderColor);
+  --color-bolt-elements-borderColorActive: var(--bolt-elements-borderColorActive);
+  --color-bolt-elements-bg-depth-1: var(--bolt-elements-bg-depth-1);
+  --color-bolt-elements-bg-depth-2: var(--bolt-elements-bg-depth-2);
+  --color-bolt-elements-bg-depth-3: var(--bolt-elements-bg-depth-3);
+  --color-bolt-elements-bg-depth-4: var(--bolt-elements-bg-depth-4);
+  --color-bolt-elements-textPrimary: var(--bolt-elements-textPrimary);
+  --color-bolt-elements-textSecondary: var(--bolt-elements-textSecondary);
+  --color-bolt-elements-textTertiary: var(--bolt-elements-textTertiary);
+  --color-bolt-elements-code-background: var(--bolt-elements-code-background);
+  --color-bolt-elements-code-text: var(--bolt-elements-code-text);
+  --color-bolt-elements-button-primary-background: var(--bolt-elements-button-primary-background);
+  --color-bolt-elements-button-primary-backgroundHover: var(--bolt-elements-button-primary-backgroundHover);
+  --color-bolt-elements-button-primary-text: var(--bolt-elements-button-primary-text);
+  --color-bolt-elements-button-secondary-background: var(--bolt-elements-button-secondary-background);
+  --color-bolt-elements-button-secondary-backgroundHover: var(--bolt-elements-button-secondary-backgroundHover);
+  --color-bolt-elements-button-secondary-text: var(--bolt-elements-button-secondary-text);
+  --color-bolt-elements-button-danger-background: var(--bolt-elements-button-danger-background);
+  --color-bolt-elements-button-danger-backgroundHover: var(--bolt-elements-button-danger-backgroundHover);
+  --color-bolt-elements-button-danger-text: var(--bolt-elements-button-danger-text);
+  --color-bolt-elements-item-contentDefault: var(--bolt-elements-item-contentDefault);
+  --color-bolt-elements-item-contentActive: var(--bolt-elements-item-contentActive);
+  --color-bolt-elements-item-contentAccent: var(--bolt-elements-item-contentAccent);
+  --color-bolt-elements-item-contentDanger: var(--bolt-elements-item-contentDanger);
+  --color-bolt-elements-item-backgroundDefault: var(--bolt-elements-item-backgroundDefault);
+  --color-bolt-elements-item-backgroundActive: var(--bolt-elements-item-backgroundActive);
+  --color-bolt-elements-item-backgroundAccent: var(--bolt-elements-item-backgroundAccent);
+  --color-bolt-elements-item-backgroundDanger: var(--bolt-elements-item-backgroundDanger);
+  --color-bolt-elements-artifacts-background: var(--bolt-elements-artifacts-background);
+  --color-bolt-elements-artifacts-backgroundHover: var(--bolt-elements-artifacts-backgroundHover);
+  --color-bolt-elements-artifacts-borderColor: var(--bolt-elements-artifacts-borderColor);
+  --color-bolt-elements-artifacts-inlineCode-background: var(--bolt-elements-artifacts-inlineCode-background);
+  --color-bolt-elements-artifacts-inlineCode-text: var(--bolt-elements-artifacts-inlineCode-text);
+  --color-bolt-elements-actions-background: var(--bolt-elements-actions-background);
+  --color-bolt-elements-actions-code-background: var(--bolt-elements-actions-code-background);
+  --color-bolt-elements-messages-background: var(--bolt-elements-messages-background);
+  --color-bolt-elements-messages-linkColor: var(--bolt-elements-messages-linkColor);
+  --color-bolt-elements-messages-code-background: var(--bolt-elements-messages-code-background);
+  --color-bolt-elements-messages-inlineCode-background: var(--bolt-elements-messages-inlineCode-background);
+  --color-bolt-elements-messages-inlineCode-text: var(--bolt-elements-messages-inlineCode-text);
+  --color-bolt-elements-icon-success: var(--bolt-elements-icon-success);
+  --color-bolt-elements-icon-error: var(--bolt-elements-icon-error);
+  --color-bolt-elements-icon-primary: var(--bolt-elements-icon-primary);
+  --color-bolt-elements-icon-secondary: var(--bolt-elements-icon-secondary);
+  --color-bolt-elements-icon-tertiary: var(--bolt-elements-icon-tertiary);
+  --color-bolt-elements-dividerColor: var(--bolt-elements-dividerColor);
+  --color-bolt-elements-loader-background: var(--bolt-elements-loader-background);
+  --color-bolt-elements-loader-progress: var(--bolt-elements-loader-progress);
+  --color-bolt-elements-prompt-background: var(--bolt-elements-prompt-background);
+  --color-bolt-elements-sidebar-dropdownShadow: var(--bolt-elements-sidebar-dropdownShadow);
+  --color-bolt-elements-sidebar-buttonBackgroundDefault: var(--bolt-elements-sidebar-buttonBackgroundDefault);
+  --color-bolt-elements-sidebar-buttonBackgroundHover: var(--bolt-elements-sidebar-buttonBackgroundHover);
+  --color-bolt-elements-sidebar-buttonText: var(--bolt-elements-sidebar-buttonText);
+  --color-bolt-elements-preview-addressBar-background: var(--bolt-elements-preview-addressBar-background);
+  --color-bolt-elements-preview-addressBar-backgroundHover: var(--bolt-elements-preview-addressBar-backgroundHover);
+  --color-bolt-elements-preview-addressBar-backgroundActive: var(--bolt-elements-preview-addressBar-backgroundActive);
+  --color-bolt-elements-preview-addressBar-text: var(--bolt-elements-preview-addressBar-text);
+  --color-bolt-elements-preview-addressBar-textActive: var(--bolt-elements-preview-addressBar-textActive);
+  --color-bolt-elements-terminals-background: var(--bolt-elements-terminals-background);
+  --color-bolt-elements-terminals-buttonBackground: var(--bolt-elements-terminals-buttonBackground);
+  --color-bolt-elements-cta-background: var(--bolt-elements-cta-background);
+  --color-bolt-elements-cta-text: var(--bolt-elements-cta-text);
+
+  /* ─── Bolt Accent Colors (MAYA Orange) ────────────── */
+  --color-accent-50: #FDF0E8;
+  --color-accent-100: #FCDEC7;
+  --color-accent-200: #F5B98A;
+  --color-accent-500: #E8601A;
+  --color-accent-600: #C94E12;
+  --color-accent-700: #A5400E;
 }
 
 @layer base {
   body {
     @apply bg-[#F5F4F0] text-[#1A1917];
+    font-feature-settings: 'kern' 1, 'liga' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   .dark body {
     @apply bg-[#1A1917] text-[#F5F4F0];
   }
+
+  /* Smooth scrolling with reduced motion respect */
+  html {
+    scroll-behavior: smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Premium selection colors */
+  ::selection {
+    background-color: rgba(232, 96, 26, 0.2);
+    color: inherit;
+  }
 }
 
-/* MAYA Custom Animations */
+/* ─── MAYA Premium Animations ──────────────────────────────── */
+
+/* Skeleton shimmer loader */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.04) 25%,
+    rgba(0, 0, 0, 0.08) 37%,
+    rgba(0, 0, 0, 0.04) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+
+.dark .skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.1) 37%,
+    rgba(255, 255, 255, 0.04) 63%
+  );
+  background-size: 200% 100%;
+}
+
+/* Scroll-triggered fade-up-blur reveal */
+@keyframes fade-up-blur {
+  from {
+    opacity: 0;
+    transform: translateY(2rem);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translateY(2rem);
+  filter: blur(8px);
+}
+
+.reveal-on-scroll.revealed {
+  animation: fade-up-blur var(--duration-reveal) var(--ease-out-expo) forwards;
+}
+
+/* Ripple effect for mic button */
 @keyframes ripple {
   0% {
     transform: translate(-50%, -50%) scale(1);
@@ -53,16 +244,49 @@
   }
 }
 
+/* Audio waveform bars */
 @keyframes audio-bar {
   0% { height: 10%; }
   100% { height: 90%; }
 }
 
+/* Breathing pulse */
 @keyframes pulse-slow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
 
+/* Status dot breathing */
+@keyframes breathe {
+  0%, 100% { 
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% { 
+    transform: scale(1.3);
+    opacity: 0.4;
+  }
+}
+
+/* Stagger entrance — applied via CSS variable --stagger-index */
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(1.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-child {
+  opacity: 0;
+  animation: stagger-in var(--duration-slow) var(--ease-out-expo) forwards;
+  animation-delay: calc(var(--stagger-index, 0) * 80ms);
+}
+
+/* Utility animation classes */
 .ring-animation {
   animation: ripple 2s linear infinite;
 }
@@ -74,3 +298,88 @@
 .animate-pulse-slow {
   animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+.animate-breathe {
+  animation: breathe 2.5s var(--ease-smooth) infinite;
+}
+
+/* ─── Premium Transition Utilities ─────────────────────────── */
+
+.transition-premium {
+  transition: all var(--duration-slow) var(--ease-premium);
+}
+
+.transition-fast {
+  transition: all var(--duration-fast) var(--ease-out-expo);
+}
+
+.transition-reveal {
+  transition: all var(--duration-reveal) var(--ease-out-expo);
+}
+
+/* Tactile press feedback */
+.press-feedback:active {
+  transform: scale(0.98) translateY(1px);
+}
+
+/* ─── Double-Bezel Utility Classes ─────────────────────────── */
+
+.bezel-outer {
+  padding: var(--bezel-padding);
+  border-radius: var(--bezel-radius-outer);
+  box-shadow: var(--bezel-shadow);
+  border: 1px solid var(--bezel-border-light);
+  background: rgba(0, 0, 0, 0.02);
+  transition: box-shadow var(--duration-slow) var(--ease-premium);
+}
+
+.dark .bezel-outer {
+  border-color: var(--bezel-border-dark);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.bezel-outer:hover {
+  box-shadow: var(--bezel-shadow-hover);
+}
+
+.bezel-inner {
+  border-radius: var(--bezel-radius-inner);
+  box-shadow: var(--bezel-inner-highlight);
+  overflow: hidden;
+}
+
+/* ─── Custom Animations ──────────────────────────────── */
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.85; }
+}
+
+.animate-breathe {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+/* ─── Scrollbar Hide ─────────────────────────────────── */
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── Mobile Safe Area ───────────────────────────────── */
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent iOS zoom on input focus */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+

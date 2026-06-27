@@ -141,7 +141,10 @@ describe('client wiring', () => {
       const src = read(hook);
       expect(src.startsWith("'use client'"), `${hook} should be 'use client'`).toBe(true);
     }
-    expect(read('lib/workbench/hooks/useGenerateJob.ts')).toContain("import { useQuery }");
+    // useGenerateJob uses Convex's typed experimental hook so errors don't
+    // bubble to app/error.tsx.
+    expect(read('lib/workbench/hooks/useGenerateJob.ts'))
+      .toMatch(/useQuery_experimental\s+as\s+useQuery/);
     expect(read('lib/workbench/hooks/useCreateGenerateJob.ts')).toContain("import { useMutation }");
     expect(read('lib/workbench/hooks/useCancelGenerateJob.ts')).toContain("import { useMutation }");
   });

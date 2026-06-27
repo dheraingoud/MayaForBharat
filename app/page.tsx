@@ -85,6 +85,7 @@ export default function LandingPage() {
   const [isThinking, setIsThinking] = useState(false)
   const [thinkDuration, setThinkDuration] = useState(0)
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
   const thinkStartRef = useRef(Date.now())
   const planAbortRef = useRef<AbortController | null>(null)
 
@@ -373,49 +374,45 @@ export default function LandingPage() {
     }
   }, [prompt, stopListening, activeTier, selectedTier])
 
-  const handleApprove = useCallback(async () => {
+  const handleApprove = useCallback(() => {
     if (planData) {
       sessionStorage.setItem('maya-plan', JSON.stringify(planData))
     }
     const planName = planData?.name || ''
     const submittedPromptStr = submittedPrompt || prompt.trim() || ''
 
-    // Ask the new endpoint to mint an appId + create the apps row.
-    // Then redirect to /workbench/[appId]?... — the wrapper there kicks off the
-    // detached generation. If the endpoint fails we fall back to the legacy
-    // /workbench?prompt=... redirect (which still produces a working build via
-    // the SSE chat flow).
-    let appId: string | null = null
-    try {
-      const r = await fetch('/api/apps-from-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: submittedPromptStr }),
-      })
-      if (r.ok) {
-        const data = await r.json()
-        if (data && typeof data.appId === 'string') appId = data.appId
-      } else {
-        console.warn('[approve] apps-from-plan failed', r.status)
-      }
-    } catch (e) {
-      console.warn('[approve] apps-from-plan error', e)
-    }
+    // Mint the appId HERE on the client so the redirect to /workbench/[id] is
+    // instant — no waiting for the LLM to come back with one. The Convex row
+    // for this appId is created lazily by /api/apps-from-plan in the background
+    // (it may fail and we already-redirected; that's fine — the workbench page
+    // shows a preparing/connected state on missing rows).
+    const appId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`)
 
     const params = new URLSearchParams()
-    // NOTE: appId is NOT put in the query string. /workbench/[id]/page.tsx
-    // reads the appId from the URL path segment, not from a query param;
-    // adding `?appId=` would be dead URL noise.
+    // appId lives in the URL path; query only carries UX context.
     params.set('prompt', submittedPromptStr)
     if (planName) params.set('name', planName)
     params.set('model', activeTier.model)
     params.set('provider', activeTier.provider)
     params.set('tierIdx', String(selectedTier))
 
-    const dest = appId
-      ? `/workbench/${appId}?${params.toString()}`
-      : `/workbench?${params.toString()}` // legacy fallback (no appId)
+    const dest = `/workbench/${appId}?${params.toString()}`
+
+    // Navigate immediately — the workbench page subscribes and shows
+    // 'preparing' until the Convex row is created by the post-fire below.
     window.location.href = dest
+
+    // Fire-and-forget the POST that creates the Convex shell + LLM plan.
+    // No await — this runs in the background of the navigation.
+    fetch('/api/apps-from-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: submittedPromptStr, preallocatedAppId: appId }),
+    }).catch((e) => {
+      console.warn('[approve] background apps-from-plan failed', e)
+    })
   }, [prompt, submittedPrompt, planData, activeTier, selectedTier])
 
   const handleStartOver = useCallback(() => {

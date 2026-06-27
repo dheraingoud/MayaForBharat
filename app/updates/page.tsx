@@ -1,69 +1,86 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useTheme } from 'next-themes'
 import { useLanguage } from '@/app/providers'
 import { useRouter } from 'next/navigation'
 import { Navigation } from '@/components/navigation'
 import { ShaderBackground } from '@/components/shader-background'
 import { content } from '@/lib/translations'
 import { motion } from 'framer-motion'
-import { CheckCircle, ArrowUpRight, ChevronRight } from 'lucide-react'
+import { CheckCircle2, ArrowUpRight, ChevronLeft, Bell, Code2, Zap, TrendingUp, AlertTriangle, Loader2 } from 'lucide-react'
 
-interface Update {
+const EASE_PREMIUM = [0.32, 0.72, 0, 1] as const
+
+interface RealUpdate {
   id: string
-  appKey: string
-  typeKey: string
-  featureKey: string
-  improvementKey: string
-  timestamp: string
-  icon: string
-  viewed: boolean
+  appId: string
+  appName: string
+  appNameHindi: string
+  message: string
+  messageHi: string
+  type: 'improvement' | 'gate_fail' | 'observation'
+  filesModified: string[]
+  createdAt: string
+}
+
+const TYPE_CONFIG = {
+  improvement: {
+    icon: CheckCircle2,
+    color: 'text-[#2D7A4F]',
+    bg: 'bg-[#2D7A4F]/10',
+    labelEn: 'Improvement',
+    labelHi: 'सुधार',
+  },
+  gate_fail: {
+    icon: AlertTriangle,
+    color: 'text-amber-500',
+    bg: 'bg-amber-500/10',
+    labelEn: 'Gate Failed',
+    labelHi: 'गेट विफल',
+  },
+  observation: {
+    icon: TrendingUp,
+    color: 'text-[#E8601A]',
+    bg: 'bg-[#E8601A]/10',
+    labelEn: 'Observation',
+    labelHi: 'अवलोकन',
+  },
+}
+
+function timeAgo(dateStr: string, lang: string): string {
+  const now = Date.now()
+  const then = new Date(dateStr).getTime()
+  const diffMs = now - then
+  const diffMin = Math.floor(diffMs / 60000)
+  const diffHr = Math.floor(diffMs / 3600000)
+  const diffDay = Math.floor(diffMs / 86400000)
+
+  if (diffMin < 1) return lang === 'hi' ? 'अभी' : 'Just now'
+  if (diffMin < 60) return lang === 'hi' ? `${diffMin} मिनट पहले` : `${diffMin}m ago`
+  if (diffHr < 24) return lang === 'hi' ? `${diffHr} घंटे पहले` : `${diffHr}h ago`
+  if (diffDay < 7) return lang === 'hi' ? `${diffDay} दिन पहले` : `${diffDay}d ago`
+  return new Date(dateStr).toLocaleDateString(lang === 'hi' ? 'hi-IN' : 'en-IN', { month: 'short', day: 'numeric' })
 }
 
 export default function Updates() {
   const { language } = useLanguage()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const [updates, setUpdates] = useState<RealUpdate[]>([])
+  const [loading, setLoading] = useState(true)
 
   const t = content[language]
 
-  const updates: Update[] = [
-    {
-      id: '1',
-      appKey: 'ramKirana',
-      typeKey: 'ramKirana',
-      featureKey: 'automaticReorder',
-      improvementKey: 'automaticReorder',
-      timestamp: '2 hours ago',
-      icon: '🔔',
-      viewed: false,
-    },
-    {
-      id: '2',
-      appKey: 'shyamTailors',
-      typeKey: 'shyamTailors',
-      featureKey: 'voiceMeasurement',
-      improvementKey: 'voiceMeasurement',
-      timestamp: '4 hours ago',
-      icon: '🎙️',
-      viewed: false,
-    },
-    {
-      id: '3',
-      appKey: 'dairyPlus',
-      typeKey: 'dairyPlus',
-      featureKey: 'morningReport',
-      improvementKey: 'morningReport',
-      timestamp: '8 hours ago',
-      icon: '📊',
-      viewed: true,
-    },
-  ]
+  useEffect(() => {
+    setMounted(true)
+    fetch('/api/updates')
+      .then(r => r.json())
+      .then(d => {
+        setUpdates(d.updates || [])
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
 
   if (!mounted) return null
 
@@ -71,184 +88,179 @@ export default function Updates() {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
-      transition: {
-        staggerChildren: 0.08,
-        delayChildren: 0.2,
-      },
+      transition: { staggerChildren: 0.06, delayChildren: 0.15 },
     },
   }
 
   const itemVariants = {
-    hidden: { opacity: 0, y: 16 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.4, ease: 'easeOut' as const },
-    },
+    hidden: { opacity: 0, y: 12 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: EASE_PREMIUM } },
   }
-
-  const handleUpdateClick = (updateId: string) => {
-    console.log('[v0] Update viewed:', updateId)
-  }
-
-  const handleBackClick = () => {
-    router.back()
-  }
-
-  const unviewedCount = updates.filter((u) => !u.viewed).length
 
   return (
-    <div className="relative min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
+    <div className="relative min-h-[100dvh] bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
       <ShaderBackground />
 
       <div className="relative z-10">
         <Navigation />
 
-        {/* Main Content */}
-        <main className="max-w-4xl mx-auto px-5 sm:px-8 lg:px-12 py-8 sm:py-12 pb-24">
-          {/* Page Header with Back Button */}
+        <main className="max-w-2xl mx-auto px-5 sm:px-8 py-8 sm:py-12 pb-24">
+          {/* Page Header */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="mb-8 sm:mb-12 flex items-center justify-between"
-          >
-            <div>
-              <button
-                onClick={handleBackClick}
-                className="inline-flex items-center gap-2 text-[#6B6560] dark:text-[#9E9890] hover:text-[#1A1917] dark:hover:text-[#F5F4F0] transition-colors mb-4"
-              >
-                <ChevronRight className="w-4 h-4 rotate-180" />
-                <span className="text-sm font-medium">{t.updates.back}</span>
-              </button>
-              <h1
-                className="text-3xl sm:text-4xl font-bold text-[#1A1917] dark:text-white"
-                style={{ fontFamily: 'var(--font-sora)' }}
-              >
-                {t.updates.title}
-              </h1>
-              <p className="text-sm sm:text-base text-[#6B6560] dark:text-[#9E9890] mt-2">
-                {unviewedCount > 0
-                  ? `${unviewedCount} ${t.updates.newUpdates}`
-                  : t.updates.allViewed}
-              </p>
-            </div>
-          </motion.div>
-
-          {/* Updates List */}
-          <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-            className="space-y-3 sm:space-y-4"
-          >
-            {updates.map((update, idx) => {
-              const appData = t.apps?.[update.appKey as keyof typeof t.apps] as
-                                | { name: string; type: string }
-                                | undefined
-              const updateData = t.updateItems?.[
-                update.featureKey as keyof typeof t.updateItems
-              ] as { feature: string; improvement: string } | undefined
-
-              return (
-                <motion.button
-                  key={update.id}
-                  variants={itemVariants}
-                  onClick={() => handleUpdateClick(update.id)}
-                  className={`w-full text-left transition-all duration-300 group`}
-                >
-                  <div
-                    className={`relative overflow-hidden rounded-2xl sm:rounded-3xl border backdrop-blur-sm p-4 sm:p-6 hover:shadow-lg hover:shadow-[#E8601A]/10 dark:hover:shadow-[#E8601A]/20 transition-all duration-300 ${
-                      !update.viewed
-                        ? 'bg-white/80 dark:bg-[#2A2925]/80 border-[#E8601A]/30 dark:border-[#E8601A]/40 shadow-md shadow-[#E8601A]/5'
-                        : 'bg-white/50 dark:bg-[#2A2925]/50 border-[#E4E1DA]/50 dark:border-white/5'
-                    }`}
-                  >
-                    {/* Unread Indicator */}
-                    {!update.viewed && (
-                      <div className="absolute top-0 left-0 w-1 h-full bg-[#E8601A]" />
-                    )}
-
-                    <div className="flex items-start gap-4">
-                      {/* Icon */}
-                      <div className="flex-shrink-0">
-                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-[#E8601A]/20 to-[#E8601A]/5 dark:from-[#E8601A]/30 dark:to-[#E8601A]/10 flex items-center justify-center text-lg sm:text-xl">
-                          {update.icon}
-                        </div>
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-4 mb-2">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="font-semibold text-sm sm:text-base text-[#1A1917] dark:text-white">
-                                {appData?.name || update.appKey}
-                              </h3>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-[#E8601A]/10 dark:bg-[#E8601A]/20 text-[#E8601A]">
-                                {appData?.type || update.typeKey}
-                              </span>
-                            </div>
-                            <p className="text-xs sm:text-sm text-[#6B6560] dark:text-[#9E9890]">
-                              {updateData?.feature || update.featureKey}
-                            </p>
-                          </div>
-                          {!update.viewed && (
-                            <div className="flex-shrink-0">
-                              <motion.div
-                                animate={{ scale: [1, 1.1, 1] }}
-                                transition={{ duration: 2, repeat: Infinity }}
-                                className="w-3 h-3 rounded-full bg-[#E8601A]"
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Improvement Description */}
-                        <p className="text-xs sm:text-sm text-[#6B6560] dark:text-[#9E9890] leading-relaxed mb-3 group-hover:text-[#1A1917] dark:group-hover:text-[#F5F4F0] transition-colors">
-                          {updateData?.improvement || update.improvementKey}
-                        </p>
-
-                        {/* Footer */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-[#9E9890] dark:text-[#6B6560]">
-                            {update.timestamp}
-                          </span>
-                          <div className="inline-flex items-center gap-1 text-[#E8601A] text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                            {t.updates.view}
-                            <ArrowUpRight className="w-3 h-3" />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Viewed Indicator */}
-                      {update.viewed && (
-                        <div className="flex-shrink-0 hidden sm:flex">
-                          <CheckCircle className="w-5 h-5 text-[#2D7A4F]" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </motion.button>
-              )
-            })}
-          </motion.div>
-
-          {/* Call to Action */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="mt-12 sm:mt-16 text-center"
+            transition={{ duration: 0.5, ease: EASE_PREMIUM }}
+            className="mb-8"
           >
             <button
-              onClick={handleBackClick}
-              className="inline-flex items-center gap-2 px-6 sm:px-8 py-3 sm:py-4 bg-[#E8601A] hover:bg-[#C94E12] text-white rounded-full font-semibold transition-colors shadow-lg"
+              onClick={() => router.back()}
+              className="inline-flex items-center gap-1.5 text-[#6B6560] dark:text-[#9E9890] hover:text-[#1A1917] dark:hover:text-[#F5F4F0] transition-colors mb-4 text-sm font-medium"
             >
-              {t.updates.viewAllApps}
-              <ArrowUpRight className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" />
+              {t.updates.back}
             </button>
+            <h1
+              className="text-2xl sm:text-3xl font-bold"
+              style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}
+            >
+              {t.updates.title}
+            </h1>
+            <p className="text-sm text-[#6B6560] dark:text-[#9E9890] mt-1">
+              {loading
+                ? (language === 'hi' ? 'लोड हो रहा है...' : 'Loading...')
+                : updates.length > 0
+                  ? (language === 'hi' ? `${updates.length} अपडेट` : `${updates.length} update${updates.length !== 1 ? 's' : ''}`)
+                  : (language === 'hi' ? 'कोई अपडेट नहीं' : 'No updates yet')}
+            </p>
           </motion.div>
+
+          {/* Loading State */}
+          {loading && (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-6 h-6 animate-spin text-[#E8601A]" />
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!loading && updates.length === 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-col items-center justify-center py-20 text-center"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-[#FDF0E8] dark:bg-[#E8601A]/15 flex items-center justify-center mb-4">
+                <Bell className="w-7 h-7 text-[#E8601A]" strokeWidth={1.5} />
+              </div>
+              <h3
+                className="text-lg font-bold mb-2"
+                style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}
+              >
+                {language === 'hi' ? 'अभी कोई अपडेट नहीं' : 'No Updates Yet'}
+              </h3>
+              <p className="text-sm text-[#6B6560] dark:text-[#9E9890] max-w-sm">
+                {language === 'hi'
+                  ? 'जब MAYA आपके ऐप में सुधार करेगा, तो अपडेट यहां दिखेंगे।'
+                  : 'Updates will appear here when MAYA improves your apps.'}
+              </p>
+            </motion.div>
+          )}
+
+          {/* Updates List */}
+          {!loading && updates.length > 0 && (
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              className="space-y-3"
+            >
+              {updates.map((update) => {
+                const config = TYPE_CONFIG[update.type] || TYPE_CONFIG.improvement
+                const Icon = config.icon
+
+                return (
+                  <motion.button
+                    key={update.id}
+                    variants={itemVariants}
+                    onClick={() => router.push(`/workbench/${update.appId}/evolution`)}
+                    className="w-full text-left group"
+                  >
+                    <div className="relative overflow-hidden rounded-2xl border bg-white/80 dark:bg-[#2A2925]/80 backdrop-blur-sm border-[#E4E1DA] dark:border-white/10 p-4 sm:p-5 hover:shadow-lg hover:shadow-[#E8601A]/5 transition-all duration-300">
+                      <div className="flex items-start gap-3.5">
+                        {/* Icon */}
+                        <div className={`w-10 h-10 rounded-xl ${config.bg} flex items-center justify-center flex-shrink-0`}>
+                          <Icon className={`w-5 h-5 ${config.color}`} strokeWidth={1.5} />
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-3 mb-1">
+                            <div>
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <h3 className="font-semibold text-sm">
+                                  {language === 'hi' ? update.appNameHindi : update.appName}
+                                </h3>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full ${config.bg} ${config.color} font-medium`}>
+                                  {language === 'hi' ? config.labelHi : config.labelEn}
+                                </span>
+                              </div>
+                              <p className="text-xs sm:text-sm text-[#6B6560] dark:text-[#9E9890] leading-relaxed group-hover:text-[#1A1917] dark:group-hover:text-[#F5F4F0] transition-colors">
+                                {language === 'hi' ? update.messageHi : update.message}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Files modified */}
+                          {update.filesModified.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {update.filesModified.slice(0, 3).map((f, i) => (
+                                <span key={i} className="text-[9px] px-1.5 py-0.5 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#6B6560] rounded font-mono">
+                                  {f.split('/').pop()}
+                                </span>
+                              ))}
+                              {update.filesModified.length > 3 && (
+                                <span className="text-[9px] px-1.5 py-0.5 bg-[#F5F4F0] dark:bg-[#1A1917] text-[#9E9890] rounded">
+                                  +{update.filesModified.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Footer */}
+                          <div className="flex items-center justify-between mt-2.5">
+                            <span className="text-[10px] text-[#9E9890] dark:text-[#6B6560]">
+                              {timeAgo(update.createdAt, language)}
+                            </span>
+                            <div className="inline-flex items-center gap-1 text-[#E8601A] text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                              {t.updates.view}
+                              <ArrowUpRight className="w-3 h-3" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.button>
+                )
+              })}
+            </motion.div>
+          )}
+
+          {/* Bottom CTA */}
+          {!loading && updates.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4, duration: 0.5, ease: EASE_PREMIUM }}
+              className="mt-12 text-center"
+            >
+              <button
+                onClick={() => router.push('/dashboard')}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[#E8601A] hover:bg-[#C94E12] text-white rounded-full font-semibold text-sm transition-colors shadow-lg cursor-pointer"
+              >
+                {t.updates.viewAllApps}
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
         </main>
       </div>
     </div>

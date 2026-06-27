@@ -142,12 +142,40 @@ export async function generateJobsHandler(
             await checkCancel();
           }
         },
-        onError: async () => {
-          // The error is re-thrown by streamText; final markError is in the catch arm.
+        onError: async (event: { error?: unknown }) => {
+          // DIAGNOSTIC: capture the actual error so we know why the stream died.
+          // Persist into the row so it's inspectable from `npx convex data generateJobs`.
+          console.error('[generateJobsHandler] streamText onError:', event?.error);
+          await ctx.runMutation(internal.generateJobs.saveProgress, {
+            jobId,
+            partialText: partialText || '',
+            progressNote: `stream error: ${String((event?.error as any)?.message ?? event?.error ?? '').slice(0, 200)}`,
+          });
         },
-        onFinish: async (event: { text?: string }) => {
-          const finalText: string = event?.text ?? partialText;
+        onFinish: async (event: any) => {
+          // Some reasoning models emit zero visible text — everything went into
+          // <reasoning> blocks. Fall back to the concatenated reasoning text so
+          // file extraction has something to work with.
+          const visible: string = event?.text ?? '';
+          const reasoningText: string = Array.isArray(event?.reasoning)
+            ? event.reasoning.map((r: any) => String(r?.text ?? '')).join('')
+            : '';
+          const finalText: string =
+            (visible && visible.length > 0 ? visible : '') ||
+            partialText ||
+            reasoningText;
+          console.log(
+            '[generateJobsHandler] onFinish fired. visible=' + visible.length +
+            ' partial=' + partialText.length + ' reasoning=' + reasoningText.length + ' final=' + finalText.length,
+          );
           parsedFiles = extractBoltFiles(finalText, true);
+          if (parsedFiles.length === 0 && finalText.length > 0) {
+            await ctx.runMutation(internal.generateJobs.saveProgress, {
+              jobId,
+              partialText: finalText,
+              progressNote: `finished with 0 files — raw text saved for diagnosis (${finalText.length} chars)`,
+            });
+          }
           await ctx.runMutation(internal.generateJobs.markLive, {
             jobId,
             files: parsedFiles,

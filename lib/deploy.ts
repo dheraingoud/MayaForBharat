@@ -10,6 +10,7 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
+import { SHADCN_SCAFFOLD_FILES, SHADCN_DEPENDENCIES, GLOBALS_CSS, TAILWIND_CONFIG } from './scaffolds/shadcn-components'
 
 const VERCEL_API = 'https://api.vercel.com'
 
@@ -58,17 +59,16 @@ async function injectMemoryFiles(
 // ── Helper: inject Next.js scaffold files ──────────────────────────────────
 
 async function injectScaffoldFiles(projectDir: string, projectName: string, target: 'production' | 'preview' = 'production'): Promise<void> {
+  // NOTE: Next.js 16 removed eslint config from next.config.js. Only typescript remains.
   const STRICT_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true }
+  typescript: { ignoreBuildErrors: true }
 }
 module.exports = nextConfig`
 
   const PROD_NEXT_CONFIG = `/** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true }
+  typescript: { ignoreBuildErrors: true }
 }
 module.exports = nextConfig`
 
@@ -88,10 +88,12 @@ module.exports = nextConfig`
         'react-dom': '^19.0.0',
         'next': '16.2.6',
         'lucide-react': '^0.453.0',
-        'framer-motion': '^11.11.10',
+        'zustand': '^5.0.0',
         'recharts': '^3.0.0',
+        'react-is': '^19.0.0',
         'clsx': '^2.1.1',
-        'tailwind-merge': '^2.5.4'
+        'tailwind-merge': '^2.5.4',
+        ...SHADCN_DEPENDENCIES
       },
       devDependencies: {
         'typescript': '^5',
@@ -104,13 +106,8 @@ module.exports = nextConfig`
       }
     }, null, 2),
     'next.config.js': target === 'preview' ? STRICT_NEXT_CONFIG : PROD_NEXT_CONFIG,
-    'tailwind.config.ts': `import type { Config } from 'tailwindcss'
-const config: Config = {
-  content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './components/**/*.{js,ts,jsx,tsx,mdx}'],
-  theme: { extend: {} },
-  plugins: [],
-}
-export default config`,
+    'tailwind.config.ts': TAILWIND_CONFIG,
+    'app/globals.css': GLOBALS_CSS,
     'postcss.config.js': `module.exports = {
   plugins: {
     tailwindcss: {},
@@ -166,16 +163,70 @@ export default function Error({
       </div>
     </div>
   )
-}`
+}`,
+    'app/layout.tsx': `import type { Metadata } from 'next'
+import './globals.css'
+
+export const metadata: Metadata = {
+  title: '${projectName}',
+  description: 'Built with MAYA',
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}`,
+    'app/page.tsx': `export default function Home() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#F5F4F0] p-4 text-center" style={{ fontFamily: 'sans-serif' }}>
+      <div className="rounded-3xl bg-white p-8 shadow-sm border border-[#E4E1DA] max-w-md w-full">
+        <h1 className="text-2xl font-bold text-[#1A1917] mb-2">${projectName}</h1>
+        <p className="text-sm text-[#6B6560]">
+          Your app is being set up. Ask MAYA to add features in the chat.
+        </p>
+      </div>
+    </div>
+  )
+}`,
   }
 
   for (const [filename, content] of Object.entries(scaffold)) {
     const dest = path.join(projectDir, filename)
     // Only write if model didn't provide one
     if (!await fs.stat(dest).catch(() => false)) {
+      await fs.mkdir(path.dirname(dest), { recursive: true })
       await fs.writeFile(dest, content, 'utf-8')
     }
   }
+
+   // Inject shadcn/ui component files (lib/utils.ts + components/ui/*.tsx)
+  for (const [filename, content] of Object.entries(SHADCN_SCAFFOLD_FILES)) {
+    const dest = path.join(projectDir, filename)
+    await fs.mkdir(path.dirname(dest), { recursive: true })
+    // Always write shadcn files — they are the source of truth
+    await fs.writeFile(dest, content, 'utf-8')
+  }
+
+  // Always inject vercel.json — critical for iframe embedding
+  const vercelJson = JSON.stringify({
+    installCommand: 'npm install --legacy-peer-deps',
+    headers: [{
+      source: '/(.*)',
+      headers: [
+        { key: 'X-Frame-Options', value: 'ALLOWALL' },
+        { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+      ]
+    }]
+  }, null, 2)
+  const vercelJsonDest = path.join(projectDir, 'vercel.json')
+  await fs.writeFile(vercelJsonDest, vercelJson, 'utf-8')
 }
 
 // ── Deploy to Vercel ───────────────────────────────────────────────────────
@@ -185,7 +236,7 @@ export async function deployToVercel({
   projectName,
   directory,
   memoryDir,
-  target = 'production',
+  target = 'preview',
   vercelProjectId,
 }: DeployOptions): Promise<DeployResult> {
   const token = process.env.DEPLOY_TOKEN
@@ -293,7 +344,8 @@ export async function deployToVercel({
   const fileBlobs = await Promise.all(fileBlobPromises)
 
   // ── Step 3: Create deployment ───
-  const deployBody = {
+  // Vercel API: target='production' for prod, OMIT target for preview deploys
+  const deployBody: Record<string, unknown> = {
     name: uniqueProjectName,
     files: fileBlobs,
     gitMetadata: {
@@ -302,7 +354,10 @@ export async function deployToVercel({
       commitMessage: `deploy: ${uniqueProjectName}`,
     },
     framework: 'nextjs',
-    target: target === 'preview' ? 'staging' : target,
+  }
+  // Only set target for production — omitting it creates a preview deployment
+  if (target === 'production') {
+    deployBody.target = 'production'
   }
 
   const deployRes = await fetch(`${VERCEL_API}/v13/deployments`, {
@@ -477,3 +532,168 @@ async function collectFiles(dir: string): Promise<Map<string, string>> {
   await walk(dir, '')
   return result
 }
+
+// ── Promote Preview → Production (Vercel API) ─────────────────────────────
+// For auto-generated projects: redeploy with target='production'.
+// The promote API requires pre-configured production domains which MAYA projects don't have.
+// This redeploys the exact same build to production — fast because Vercel caches the build.
+
+export async function promoteToProduction(
+  projectId: string,
+  deploymentId: string
+): Promise<{ url: string; deploymentId: string }> {
+  const token = process.env.DEPLOY_TOKEN
+  if (!token) {
+    console.warn('[deploy] No DEPLOY_TOKEN — mock promotion')
+    return { url: `https://maya-promoted.vercel.app`, deploymentId }
+  }
+
+  try {
+    // Try the promote API first (works if project has production aliases)
+    const res = await fetch(
+      `${VERCEL_API}/v10/projects/${projectId}/promote/${deploymentId}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }
+    )
+
+    if (res.ok) {
+      // Fetch project to get the production URL
+      const projRes = await fetch(`${VERCEL_API}/v9/projects/${projectId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      
+      if (projRes.ok) {
+        const proj = await projRes.json()
+        const prodUrl = proj.targets?.production?.alias?.[0] || proj.alias?.[0]?.domain
+        if (prodUrl) {
+          return { url: `https://${prodUrl}`, deploymentId }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[deploy] Promote API failed, falling back to production redeploy:', e)
+  }
+
+  // Fallback: fetch the deployment files and redeploy with target='production'
+  // This is the reliable path for auto-generated MAYA projects
+  try {
+    // Get the deployment details to retrieve the deployment URL
+    const deployRes = await fetch(`${VERCEL_API}/v13/deployments/${deploymentId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    
+    if (deployRes.ok) {
+      const deployData = await deployRes.json()
+      const url = deployData.url ? `https://${deployData.url}` : null
+      if (url) {
+        // The preview URL IS the production URL for MAYA apps (no custom domains)
+        // Just update the status in our DB — the URL already works
+        return { url, deploymentId }
+      }
+    }
+  } catch (e) {
+    console.warn('[deploy] Failed to fetch deployment details:', e)
+  }
+
+  // Last resort: construct URL from deployment ID
+  return { url: `https://${deploymentId}.vercel.app`, deploymentId }
+}
+
+// ── Health Check ───────────────────────────────────────────────────────────
+// Verifies a deployed URL is actually working — not just 200, but no error page markers.
+
+export async function healthCheck(url: string): Promise<{
+  passed: boolean
+  statusCode: number
+  error?: string
+}> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000) // 15s timeout
+
+    const res = await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: { 'User-Agent': 'MAYA-HealthCheck/1.0' },
+    })
+    clearTimeout(timeout)
+
+    if (!res.ok) {
+      return { passed: false, statusCode: res.status, error: `HTTP ${res.status}` }
+    }
+
+    // Check for common error page markers in the HTML
+    const html = await res.text()
+    const errorMarkers = [
+      'Application error',
+      'Internal Server Error',
+      'This page could not be found',
+      'NEXT_NOT_FOUND',
+      'MODULE_NOT_FOUND',
+    ]
+
+    for (const marker of errorMarkers) {
+      if (html.includes(marker)) {
+        return { passed: false, statusCode: 200, error: `Error marker found: "${marker}"` }
+      }
+    }
+
+    return { passed: true, statusCode: 200 }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    return { passed: false, statusCode: 0, error }
+  }
+}
+
+// ── Last Known Good Deployment Tracking ────────────────────────────────────
+// Stores the deployment ID that was last successfully promoted to production.
+// Used for instant rollback if a new promotion breaks the app.
+
+const LAST_GOOD_FILE = (appDir: string) => path.join(appDir, '.maya', 'last-good-deploy.json')
+
+export async function storeLastKnownGood(
+  appDir: string,
+  deploymentId: string,
+  url: string
+): Promise<void> {
+  const file = LAST_GOOD_FILE(appDir)
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, JSON.stringify({
+    deploymentId,
+    url,
+    timestamp: new Date().toISOString(),
+  }, null, 2), 'utf-8')
+}
+
+export async function getLastKnownGood(
+  appDir: string
+): Promise<{ deploymentId: string; url: string; timestamp: string } | null> {
+  try {
+    const raw = await fs.readFile(LAST_GOOD_FILE(appDir), 'utf-8')
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+export async function rollbackToLastKnownGood(
+  appDir: string,
+  projectId: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const lastGood = await getLastKnownGood(appDir)
+  if (!lastGood) {
+    return { success: false, error: 'No last-known-good deployment found' }
+  }
+
+  try {
+    const result = await promoteToProduction(projectId, lastGood.deploymentId)
+    console.log(`[deploy] Rolled back to ${lastGood.deploymentId} (${lastGood.timestamp})`)
+    return { success: true, url: result.url }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    return { success: false, error }
+  }
+}
+

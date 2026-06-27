@@ -79,36 +79,30 @@ export const getByAppId = query({
     if (rows.length === 0) return null;
 
     // Tie-break:
-    //   1. status priority (live > building/pending > error > cancelled)
-    //   2. within the same priority: older createdAt wins for stable states
-    //      ('live', 'error', 'cancelled'); newer createdAt wins for transient
-    //      states ('building', 'pending'). Stable wins ensure the browser keeps
-    //      showing the most recent *final* build; transient keeps progress visible.
+    //   1. status priority (live > building > pending > error > cancelled).
+    //      Lower priority index = higher status priority = wins.
+    //   2. within the same status: newer createdAt wins — the latest activity
+    //      is what the user expects to see (matches v0's "latest build" UX).
+    //
+    // The score packs (1) priority + (2) recency into a single comparator.
+    // We invert priority (9 - index) so "higher score wins" matches intuition.
     const priority = ['live', 'building', 'pending', 'error', 'cancelled'];
-    const newnessWinsStatus: Record<string, boolean> = {
-      building: true,
-      pending: true,
+    const pickBest = (candidates: typeof rows) => {
+      let bestR = candidates[0];
+      for (const r of candidates.slice(1)) {
+        const pBest = priority.indexOf(bestR.status);
+        const pR = priority.indexOf(r.status);
+        if (pR !== pBest) {
+          // lower index = higher status priority → higher score wins
+          if ((9 - pR) > (9 - pBest)) bestR = r;
+          continue;
+        }
+        // same priority: tie-break on recency — always newer wins
+        if (r.createdAt > bestR.createdAt) bestR = r;
+      }
+      return bestR;
     };
-    let best: typeof rows[number] | null = null;
-    let bestPrio = -1;
-    let bestScore = -Infinity;
-    for (const r of rows) {
-      const p = priority.indexOf(r.status);
-      const prefersNewer = !!newnessWinsStatus[r.status] ? 1 : -1;
-      // Score: priority × 10^9 + recency (older rows have larger createdAt delta).
-      // Tie when status-priority is equal; recency signed by prefersNewer.
-      let score: number;
-      if (p !== bestPrio) {
-        score = p * 1e12;
-      } else {
-        score = prefersNewer * r.createdAt;
-      }
-      if (best === null || score > bestScore) {
-        best = r;
-        bestPrio = p;
-        bestScore = score;
-      }
-    }
+    const best = pickBest(rows);
     if (!best) return null;
 
     // Most recent (by createdAt) row for this appId surfaces the latest activity,

@@ -95,6 +95,79 @@ function extractJsonObject(text: string): any | null {
   return null;
 }
 
+/**
+ * Strip markdown chars, control chars, lower-case, collapse whitespace, cap at 60.
+ * Used as the sanitizer for LLM-generated names before saving them.
+ */
+function sanitizeName(name: string, fallback = 'Untitled app'): string {
+  const cleaned = String(name ?? '')
+    .replace(/[*_~`#>]+/g, '')
+    .replace(/[\u0000-\u001f]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return fallback;
+  return cleaned.length > 60 ? cleaned.slice(0, 60).trimEnd() : cleaned;
+}
+
+/**
+ * Try to pull an app name straight from the user's natural-language prompt.
+ * Recognized patterns (case-insensitive):
+ *   - "called/name it/title/name my app ... <X>"
+ *   - "an app called/name/titled <X>"
+ *   - "<X> builder/app/tool"  (when the prompt opens with that noun phrase)
+ *   - "build me <X>"  (when <X> looks like a short noun phrase)
+ * Returns null if no high-confidence name is found — the caller then falls
+ * back to whatever the LLM produced.
+ */
+export function extractAppNameFromPrompt(prompt: string): string | null {
+  if (typeof prompt !== 'string') return null;
+  const p = prompt.trim();
+  if (!p) return null;
+
+  // Use ASCII straight quotes only. Avoid curly quotes / unicode in char classes —
+  // some transpilers (and some shell-history tools) substitute characters that JS
+  // regex chokes on with "unterminated character class".
+  const QUOTE = String.raw`["']`; // class of two ASCII chars only
+  const NAME_GUTTER = String.raw`[A-Za-z0-9][A-Za-z0-9 \-_./&]{0,59}`;
+
+  const patterns: RegExp[] = [
+    // "called X" / "named X" / "titled X" / "name it X" / "name the app X"
+    new RegExp(
+      String.raw`\b(?:called|named|titled|name\s+it|name\s+the\s+app)\s+` +
+      `${QUOTE}?(${NAME_GUTTER})${QUOTE}?`,
+      'i',
+    ),
+    // "build [me|a|an|the] X [app|builder|tool|...]"
+    new RegExp(
+      String.raw`\bbuild\s+(?:me\s+|a\s+|an\s+|the\s+)?` +
+      `${QUOTE}?([A-Za-z][A-Za-z0-9 \-_./&]{0,59}?(?:\s+(?:app|builder|tool|website|game|tracker|board|planner|dashboard))?)${QUOTE}?$`,
+      'i',
+    ),
+  ];
+
+  for (const re of patterns) {
+    const m = p.match(re);
+    if (!m) continue;
+    const raw = (m[1] ?? '').trim().replace(/^[""']|[""']$/g, '');
+    if (raw.length >= 2 && raw.length <= 60) {
+      return sanitizeName(raw, raw);
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract a short one-sentence description from the prompt by taking the first
+ * sentence and trimming it. Used as a fallback when the LLM is silent on the
+ * description field.
+ */
+function extractDescription(prompt: string): string {
+  const p = prompt.trim();
+  if (!p) return '';
+  const first = p.split(/[.!?\n]+/)[0]?.trim() ?? '';
+  return first.length > 160 ? first.slice(0, 160).trimEnd() + '…' : first;
+}
+
 export async function POST(req: NextRequest) {
   let body: any;
   try {
@@ -107,25 +180,142 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'missing prompt' }, { status: 400 });
   }
 
+  // The client may have allocated the appId so the redirect can land
+  // instantly on /workbench/[id]. When provided, accept it; otherwise
+  // mint our own (legacy / fallback path).
+  const preallocatedAppId: string | undefined =
+    typeof body?.preallocatedAppId === 'string' && body.preallocatedAppId.trim()
+      ? body.preallocatedAppId.trim()
+      : undefined;
+
   // Resolve model + provider from env (mirrors /api/plan).
   const miniModelEnv = process.env.MAYA_MINI || 'stepfun-ai/step-3.7-flash';
   const bareModel = miniModelEnv.replace(/^nvidia-nim\//i, '');
   const provider = 'NvidiaNIM';
 
   let plan: any = null;
+  let rawText = '';
+  let usedFallback = false;
   try {
-    const model = createNimModel(bareModel);
-    const result = _streamText({
-      model,
-      messages: [
-        { role: 'system', content: PLAN_SYSTEM_PROMPT },
-        { role: 'user', content: prompt },
-      ],
-      maxTokens: 2048,
-      temperature: 0.7,
-    });
-    const text = await result.text;
-    plan = extractJsonObject(text);
+    // Each attempt: returns the (text or fall-back reasoning) response.
+    // Each attempt races a hard timeout — if the provider stalls we abort and
+    // fall through to the next attempt (or to a heuristic fallback plan).
+    const tryOnce = async (
+      overrides: { temperature?: number; reminder?: string; timeoutMs?: number },
+      signal: AbortSignal,
+    ) => {
+      const model = createNimModel(bareModel);
+      const userContent = overrides.reminder
+        ? `${prompt}\n\n[SYSTEM REMINDER] ${overrides.reminder}`
+        : prompt;
+      const result = _streamText({
+        model,
+        messages: [
+          { role: 'system', content: PLAN_SYSTEM_PROMPT },
+          { role: 'user', content: userContent },
+        ],
+        // 700 tokens (~2800 chars) — ample for a 600-1000 char plan JSON.
+        // Smaller budgets short-circuit stepfun's verbose reasoning and let
+        // us return faster. We bump to 1500 on second attempt below.
+        maxOutputTokens: 700,
+        temperature: overrides.temperature ?? 0.7,
+        abortSignal: signal,
+      });
+      let text: string | null = await result.text;
+      if (!text || text.length === 0) {
+        try {
+          const reasoning: unknown = await result.reasoningText;
+          if (typeof reasoning === 'string' && reasoning.trim().length > 0) {
+            text = reasoning;
+          }
+        } catch {
+          /* reasoning field may not exist on this provider */
+        }
+      }
+      return text ?? '';
+    };
+
+    const withTimeout = async <T,>(
+      p: Promise<T>,
+      ms: number,
+      label: string,
+      onAbort?: () => void,
+    ): Promise<T | null> => {
+      let timer: any;
+      try {
+        return await new Promise<T | null>((resolve, reject) => {
+          timer = setTimeout(() => {
+            try {
+              onAbort?.();
+            } catch {
+              /* */
+            }
+            resolve(null);
+          }, ms);
+          p.then(
+            (v) => {
+              clearTimeout(timer);
+              resolve(v);
+            },
+            (e) => {
+              clearTimeout(timer);
+              reject(e);
+            },
+          );
+        });
+      } catch {
+        return null;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
+    // Parallel attempts: race the original prompt (default temp, generous
+    // budget) against the temperature=0 + reminder retry. Whichever finishes
+    // first wins. Each gets its own AbortController so the loser is torn
+    // down instead of leaking tokens/seconds. Total wall time is `ms` not
+    // `ms*2` — this is the biggest win over the prior serial design.
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+
+    const firstP = withTimeout(
+      tryOnce({}, firstAbort.signal),
+      6500,
+      'first-attempt',
+      () => firstAbort.abort(),
+    );
+    const secondP = withTimeout(
+      tryOnce(
+        {
+          temperature: 0,
+          reminder:
+            'Reply with ONLY a single raw JSON object matching the system schema. ' +
+            'No prose, no markdown fences, no commentary, no trailing text.',
+        },
+        secondAbort.signal,
+      ),
+      6500,
+      'second-attempt',
+      () => secondAbort.abort(),
+    );
+
+    // Race them; whichever resolves first wins. If the first one wins we
+    // immediately abort the second attempt (it'll still resolve to null but
+    // the network call has been cancelled).
+    const racers = await Promise.allSettled([firstP, secondP]);
+    const winner =
+      racers.find((r) => r.status === 'fulfilled' && r.value && r.value.length > 0)?.value ??
+      (await firstP) ??
+      (await secondP) ??
+      '';
+    rawText = winner;
+    plan = extractJsonObject(rawText);
+    if (typeof plan?.name !== 'string') {
+      logger.error(
+        '[plan] failed to parse raw LLM output (length=' + (rawText?.length ?? 0) + '): ' +
+          String(rawText ?? '').slice(0, 400),
+      );
+    }
   } catch (e: any) {
     logger.error('[plan] LLM call failed:', e?.message ?? e);
     return NextResponse.json(
@@ -133,18 +323,46 @@ export async function POST(req: NextRequest) {
       { status: 502 },
     );
   }
-
+  // Surface any parse failure with the captured raw text (still in scope here).
+  // Fall back to a heuristic plan derived from the prompt itself so the user
+  // never sees a 502 — the workbench still gets a usable plan + appId and the
+  // build can proceed without a phantom feature/deliverable list.
   if (!plan || typeof plan.name !== 'string') {
-    return NextResponse.json(
-      { error: 'LLM produced no parseable plan' },
-      { status: 502 },
-    );
+    logger.warn('[plan] LLM returned no parseable plan; building heuristic fallback');
+    usedFallback = true;
+    const fallbackName = extractAppNameFromPrompt(prompt) ?? sanitizeName(prompt);
+    plan = {
+      name: fallbackName || 'New App',
+      description: extractDescription(prompt) || 'AI-generated app — building now.',
+      features: [
+        'Auth + private dashboard',
+        'Real-time data sync',
+        'Responsive UI with keyboard shortcuts',
+      ],
+      techStack: ['React', 'TypeScript', 'Tailwind CSS'],
+      pages: ['Home', 'Dashboard', 'Settings'],
+      dataModel: [
+        { entity: 'User', fields: ['name', 'email', 'role', 'joinedAt'] },
+        { entity: 'Item', fields: ['id', 'name', 'status', 'createdAt'] },
+      ],
+      estimatedComplexity: 'moderate',
+    };
   }
+
+  // Extract a name from the user's prompt if they phrased one. User's wording
+  // wins over the LLM's; we still let the LLM name when the user didn't.
+  const extractedName = extractAppNameFromPrompt(prompt);
+  const finalName = extractedName ?? sanitizeName(plan.name);
+  const finalDescription = extractedName
+    ? (plan.description ?? extractDescription(prompt))
+    : (plan.description ?? '');
+  // Tell the LLM (next time) to use the user-supplied name if any. Kept simple.
+  void finalDescription;
 
   // Mint a stable appId and create the apps row so:
   //   a) /workbench/[appId] has something to subscribe to
   //   b) the worker can write to apps.fileTree on completion
-  const appId = randomUUID();
+  const appId = preallocatedAppId ?? randomUUID();
   const convexUrl =
     process.env.NEXT_PUBLIC_CONVEX_URL ||
     process.env.CONVEX_URL ||
@@ -155,9 +373,9 @@ export async function POST(req: NextRequest) {
     await convex.mutation(api.apps.create, {
       traderId: 'anonymous',
       appId,
-      name: plan.name,
-      nameHindi: plan.name,
-      descriptionEn: plan.description ?? '',
+      name: finalName,
+      nameHindi: finalName,
+      descriptionEn: finalDescription,
       category: 'other',
       status: 'building',
       specJson: JSON.stringify(plan),
@@ -174,5 +392,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ plan, appId, model: bareModel, provider });
+  return NextResponse.json({ plan, appId, model: bareModel, provider, fallback: usedFallback });
 }

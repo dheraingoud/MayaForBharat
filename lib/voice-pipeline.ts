@@ -228,6 +228,7 @@ export async function buildApp(
     messages,
     maxTokensOverride: 16384,
     stream: true,
+    skipThinkWrap: true, // Builder model sends code as reasoning_content — don't wrap in <think>
     onChunk: (text) => {
       onChunk?.(text)
     }
@@ -298,8 +299,20 @@ export async function buildWithRetry(
       // Strip markdown code fences if model wrapped it
       raw = raw.replace(/^```[a-z]*\n?/gm, '').replace(/```$/gm, '').trim()
 
-      // Strip <think>...</think> reasoning blocks
-      raw = raw.replace(/<think>[\s\S]*?<\/think>/g, '')
+      // Strip <think>...</think> reasoning blocks BUT preserve any <maya-write> tags inside them
+      // The step-3.7-flash reasoning model sometimes places code output inside reasoning_content,
+      // which gets wrapped in <think>...</think> by the streaming handler. We must rescue those tags.
+      raw = raw.replace(/<think>([\s\S]*?)<\/think>/g, (_match, thinkContent) => {
+        // Extract any <maya-write>...</maya-write> blocks from inside the think content
+        const mayaWriteBlocks: string[] = []
+        const tagRegex = /<maya-write\s+path=["'][^"']+["'][^>]*>[\s\S]*?<\/maya-write>/g
+        let tagMatch
+        while ((tagMatch = tagRegex.exec(thinkContent)) !== null) {
+          mayaWriteBlocks.push(tagMatch[0])
+        }
+        // Return only the rescued maya-write blocks (discard reasoning text)
+        return mayaWriteBlocks.length > 0 ? '\n' + mayaWriteBlocks.join('\n') + '\n' : ''
+      })
 
       // Safety net: strip conversational text that leaked between </maya-write> and <maya-write> tags
       // This catches "Wait let's adjust..." or "Got it, I'll continue..." injected on resume
@@ -332,7 +345,7 @@ export async function buildWithRetry(
         // Auto-inject 'use client' for components with interactivity to prevent Next.js Server Component build crashes
         files = files.map(file => {
           if (file.path.endsWith('.tsx') && !file.path.endsWith('layout.tsx')) {
-            const hasInteractivity = file.content.includes('onClick') || file.content.includes('onChange') || file.content.includes('onSubmit') || file.content.includes('useState') || file.content.includes('useEffect') || file.content.includes('useRef')
+            const hasInteractivity = file.content.includes('onClick') || file.content.includes('onChange') || file.content.includes('onSubmit') || file.content.includes('useState') || file.content.includes('useEffect') || file.content.includes('useRef') || file.content.includes('from "framer-motion"') || file.content.includes("from 'framer-motion'") || file.content.includes('useStore') || file.content.includes('useRouter') || file.content.includes('usePathname') || file.content.includes('useSearchParams')
             const hasUseClient = file.content.includes('use client') || file.content.includes('"use client"')
             if (hasInteractivity && !hasUseClient) {
               file.content = "'use client';\n" + file.content
@@ -371,9 +384,255 @@ export function compressError(buildOutput: string): string {
   const errorLines = lines.filter(l =>
     l.includes('Error:') || l.includes('error TS') ||
     l.includes('Expected') || l.includes('Cannot find') ||
-    l.includes('FAIL') || l.includes('Module not found')
+    l.includes('FAIL') || l.includes('Module not found') ||
+    l.includes('Type error') || l.includes("isn't a valid") ||
+    l.includes('Unexpected token') || l.includes('SyntaxError')
   )
-  return errorLines.slice(0, 20).join('\n')
+  return errorLines.slice(0, 30).join('\n')
+}
+
+// ─── Extract Error Files from Build Logs ──────────────────────────────────────
+// Parses Vercel/Next.js build logs to identify WHICH files have errors.
+// This is the key to targeted fixes — we only send broken files to the AI.
+
+export function extractErrorFiles(buildLogs: string): string[] {
+  const files = new Set<string>()
+  
+  // Pattern 1: ./app/page.tsx:15:3 - error TS2304
+  const tsPattern = /\.\/([^\s:]+\.tsx?)/g
+  let match
+  while ((match = tsPattern.exec(buildLogs)) !== null) {
+    files.add(match[1])
+  }
+  
+  // Pattern 2: Module not found: Can't resolve './components/foo'
+  const modulePattern = /Module not found.*?['"]\.?\/?([^'"]+)['"]/g
+  while ((match = modulePattern.exec(buildLogs)) !== null) {
+    // This gives us the import target — find which file imports it
+    const importTarget = match[1]
+    // Add with .tsx extension as likely candidate
+    if (!importTarget.includes('.')) {
+      files.add(importTarget + '.tsx')
+      files.add(importTarget + '.ts')
+    } else {
+      files.add(importTarget)
+    }
+  }
+  
+  // Pattern 3: Error in /app/xxx/page.tsx (Next.js format)
+  const nextPattern = /(?:Error|error)\s+(?:in|at)\s+[./]*([^\s:()]+\.tsx?)/g
+  while ((match = nextPattern.exec(buildLogs)) !== null) {
+    files.add(match[1])
+  }
+  
+  // Pattern 4: Type error: ... in app/page.tsx
+  const typeErrPattern = /Type error.*?(?:in\s+)?([a-zA-Z][^\s:]+\.tsx?)/g
+  while ((match = typeErrPattern.exec(buildLogs)) !== null) {
+    files.add(match[1])
+  }
+
+  return [...files].map(f => f.replace(/^\.\//, ''))
+}
+
+// ─── Remove Unused Lucide Imports ─────────────────────────────────────────────
+// One of the most common build errors: importing a lucide icon that doesn't exist
+// or importing icons that are never used in the JSX.
+
+function removeUnusedLucideImports(content: string): string {
+  // Find lucide-react import statement
+  const lucideImportRegex = /import\s*\{([^}]+)\}\s*from\s*['"]lucide-react['"]/
+  const importMatch = content.match(lucideImportRegex)
+  if (!importMatch) return content
+  
+  const importedIcons = importMatch[1].split(',').map(s => s.trim()).filter(Boolean)
+  
+  // Check which icons are actually used in the rest of the code (after the import line)
+  const afterImport = content.slice(content.indexOf(importMatch[0]) + importMatch[0].length)
+  const usedIcons = importedIcons.filter(icon => {
+    // Check if icon is used as JSX element <IconName or as a reference
+    const iconName = icon.trim()
+    if (!iconName) return false
+    // Match <IconName, {IconName, icon={IconName, etc.
+    const usagePattern = new RegExp(`[<{,\\s]${iconName}[\\s/>),}]|\\b${iconName}\\b`, 'g')
+    // Count occurrences — need at least one usage beyond the import
+    const matches = afterImport.match(usagePattern)
+    return matches && matches.length > 0
+  })
+  
+  if (usedIcons.length === 0) {
+    // Remove entire import line
+    return content.replace(lucideImportRegex, '')
+  }
+  
+  if (usedIcons.length === importedIcons.length) {
+    return content // All icons used
+  }
+  
+  // Replace with only used icons
+  const newImport = `import { ${usedIcons.join(', ')} } from 'lucide-react'`
+  return content.replace(lucideImportRegex, newImport)
+}
+
+// ─── Deterministic Fixes (No AI Needed) ───────────────────────────────────────
+// These fix the most common build errors mechanically, saving AI tokens for
+// the harder problems. Each fix addresses a specific, repeatedly-seen error.
+
+export function applyDeterministicFixes(
+  files: Array<{ path: string; content: string }>,
+  buildLogs: string = ''
+): { files: Array<{ path: string; content: string }>; fixCount: number } {
+  let fixCount = 0
+  
+  const fixed = files.map(f => {
+    let content = f.content
+    let filePath = f.path
+    
+    // Fix 1: Missing "use client" for files with hooks/events/motion/zustand/router
+    if (filePath.endsWith('.tsx') && !filePath.endsWith('layout.tsx')) {
+      const needsUC = /\b(useState|useEffect|useRef|useCallback|useMemo|useReducer|useContext|onClick|onChange|onSubmit|onKeyDown|useStore|useRouter|usePathname|useSearchParams)\b/.test(content) || /from ['"]framer-motion['"]/.test(content)
+      const hasUC = /['"]use client['"]/.test(content)
+      if (needsUC && !hasUC) {
+        content = '"use client";\n' + content
+        fixCount++
+      }
+    }
+    
+    // Fix 2: next/router → next/navigation (Next.js 13+ App Router)
+    if (content.includes("from 'next/router'") || content.includes('from "next/router"')) {
+      content = content.replace(/from\s+['"]next\/router['"]/g, "from 'next/navigation'")
+      // Also fix useRouter import if it references the old one
+      fixCount++
+    }
+    
+    // Fix 3: Remove unused lucide-react imports
+    const beforeLucide = content
+    content = removeUnusedLucideImports(content)
+    if (content !== beforeLucide) fixCount++
+    
+    // Fix 4: .ts files containing JSX must be .tsx
+    if (filePath.endsWith('.ts') && !filePath.endsWith('.d.ts')) {
+      const hasJSX = /<[A-Z][a-zA-Z]*[\s/>]/.test(content) || /<\/[A-Z]/.test(content)
+      if (hasJSX) {
+        filePath = filePath.replace(/\.ts$/, '.tsx')
+        fixCount++
+      }
+    }
+    
+    // Fix 5: Unquoted `use client;` → proper format
+    if (/^\s*use client\s*;?\s*$/m.test(content) && !/['"]use client['"]/.test(content)) {
+      content = content.replace(/^\s*use client\s*;?\s*$/m, '"use client";')
+      fixCount++
+    }
+    
+    // Fix 6: Missing export default in page.tsx or layout.tsx files
+    if ((filePath.endsWith('page.tsx') || filePath.endsWith('layout.tsx')) && 
+        !content.includes('export default')) {
+      // Find the main function and add export default
+      const funcMatch = content.match(/^(function\s+\w+)/m)
+      if (funcMatch) {
+        content = content.replace(funcMatch[0], `export default ${funcMatch[0]}`)
+        fixCount++
+      }
+    }
+    
+    // Fix 7: h-screen → min-h-[100dvh] (Turbopack strict mode)
+    if (content.includes('h-screen')) {
+      content = content.replace(/\bh-screen\b/g, 'min-h-[100dvh]')
+      fixCount++
+    }
+    
+    // Fix 8: eslint config in next.config (Next.js 16 doesn't support it)
+    if (filePath === 'next.config.js' || filePath === 'next.config.mjs' || filePath === 'next.config.ts') {
+      if (content.includes('eslint:')) {
+        content = content.replace(/,?\s*eslint:\s*\{[^}]*\}/g, '')
+        fixCount++
+      }
+    }
+
+    // Fix 9: Remove duplicate "use client" declarations
+    const ucMatches = content.match(/['"]use client['"]\s*;?\s*\n/g)
+    if (ucMatches && ucMatches.length > 1) {
+      // Keep only the first one
+      let first = true
+      content = content.replace(/['"]use client['"]\s*;?\s*\n/g, (match) => {
+        if (first) { first = false; return match }
+        return ''
+      })
+      fixCount++
+    }
+
+    // Fix 10: Strip framer-motion (incompatible with React 19 + Next.js 16 SSR prerender)
+    // motion.div/motion.span export as undefined during SSR, causing "Element type is invalid" crash
+    if (/from\s+['"]framer-motion['"]/.test(content)) {
+      // Remove the import line
+      content = content.replace(/import\s+\{[^}]*\}\s+from\s+['"]framer-motion['"];?\s*\n?/g, '')
+      // Replace <motion.X ...> with <X ...> (strip animation props)
+      content = content.replace(/<motion\.(\w+)(\s)/g, '<$1$2')
+      // Remove animation-specific props: initial, animate, exit, transition, whileHover, whileTap, whileInView, variants, layout
+      content = content.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|variants|layout)=\{[^}]*\}/g, '')
+      // Also handle simple string prop values
+      content = content.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|variants|layout)="[^"]*"/g, '')
+      // Replace </motion.X> with </X>
+      content = content.replace(/<\/motion\.(\w+)>/g, '</$1>')
+      // Remove <AnimatePresence ...> and </AnimatePresence> wrappers
+      content = content.replace(/<AnimatePresence[^>]*>/g, '')
+      content = content.replace(/<\/AnimatePresence>/g, '')
+      fixCount++
+    }
+
+    return { path: filePath, content }
+  })
+  
+  // Fix 11: Ensure lib/store.tsx exists if any file imports from @/lib/store
+  const needsStore = fixed.some(f => f.content.includes("from '@/lib/store'") || f.content.includes('from "@/lib/store"'))
+  const hasStore = fixed.some(f => f.path === 'lib/store.tsx' || f.path === 'lib/store.ts')
+  if (needsStore && !hasStore) {
+    fixed.push({
+      path: 'lib/store.tsx',
+      content: `import { create } from 'zustand'
+
+interface AppState {
+  [key: string]: any
+}
+
+export const useStore = create<AppState>((set) => ({
+  // Stub store — MAYA auto-generated
+}))
+`
+    })
+    fixCount++
+  }
+
+  // Fix 12: Convert hex CSS variables to HSL for Tailwind compatibility
+  // Tailwind's hsl(var(--x)) requires "H S% L%" format, not "#hex"
+  const cssFile = fixed.find(f => f.path === 'app/globals.css')
+  if (cssFile) {
+    cssFile.content = cssFile.content.replace(/--(\w[\w-]*):\s*#([0-9a-fA-F]{3,8})\b/g, (_match, varName, hex) => {
+      // Convert hex to HSL
+      let r = 0, g = 0, b = 0
+      if (hex.length === 3) {
+        r = parseInt(hex[0]+hex[0], 16); g = parseInt(hex[1]+hex[1], 16); b = parseInt(hex[2]+hex[2], 16)
+      } else if (hex.length >= 6) {
+        r = parseInt(hex.slice(0,2), 16); g = parseInt(hex.slice(2,4), 16); b = parseInt(hex.slice(4,6), 16)
+      }
+      r /= 255; g /= 255; b /= 255
+      const max = Math.max(r,g,b), min = Math.min(r,g,b)
+      let h = 0, s = 0, l = (max+min)/2
+      if (max !== min) {
+        const d = max-min
+        s = l > 0.5 ? d/(2-max-min) : d/(max+min)
+        switch(max) {
+          case r: h = ((g-b)/d + (g<b?6:0))/6; break
+          case g: h = ((b-r)/d + 2)/6; break
+          case b: h = ((r-g)/d + 4)/6; break
+        }
+      }
+      return `--${varName}: ${Math.round(h*360)} ${Math.round(s*100)}% ${Math.round(l*100)}%`
+    })
+    fixCount++
+  }
+
+  return { files: fixed, fixCount }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -490,56 +749,138 @@ RULES:
   }
 }
 
+// ─── Fix Vercel Build Errors (Targeted Surgery, Not Full Rewrite) ─────────────
+// KEY INSIGHT: The old approach sent ALL files to the AI with only 8192 output
+// tokens — the model couldn't fit corrected files, producing truncated broken
+// code that failed again in an infinite loop.
+//
+// New approach:
+// 1. Apply deterministic fixes first (no AI needed, instant)
+// 2. Parse build logs to identify ONLY the broken files
+// 3. Send ONLY those files + compressed errors to AI with adequate token budget
+// 4. Merge AI fixes back into the original file set
+
 export async function fixVercelBuildErrors(
   files: Array<{ path: string; content: string }>,
-  buildLogs: string
+  buildLogs: string,
+  onProgress?: (msg: string) => void
 ): Promise<Array<{ path: string; content: string }>> {
-  const systemPrompt = `You are an expert Next.js and TypeScript developer resolving Vercel deployment errors.
-The user's application just failed the strict Vercel build step (tsc & eslint).
-Read the provided build logs carefully. Identify which files are causing the errors.
-Return ONLY the fully corrected files using XML tags:
-<maya-write path="app/page.tsx">
-... full fixed code here ...
-</maya-write>
-
-RULES:
-- Do NOT return files that do not have compiler errors.
-- Return the ENTIRE file content for the files you fix.
-- Ensure all variables and imports exist.
-- Provide no other markdown outside the tags.
-- TURBOPACK STRICT MODE: If the error is "Expected a semicolon" or "Expected '}'" around a className template literal, you MUST simplify the template literal. Do NOT use inline styles like \`bg-[hsl(...)]\` in classNames. Use standard Tailwind utilities or separate style props.`
-
-  const filesContext = files.map(f => `--- ${f.path} ---\n${f.content}`).join('\n\n')
   
-  const userPrompt = `--- BUILD LOGS ---\n${buildLogs}\n\n--- CURRENT FILES ---\n${filesContext}`
+  // ── Step 1: Deterministic fixes (instant, no AI) ──
+  const { files: deterministicFixed, fixCount } = applyDeterministicFixes(files, buildLogs)
+  if (fixCount > 0) {
+    console.log(`[fix] Applied ${fixCount} deterministic fixes`)
+    onProgress?.(`Auto-fixed ${fixCount} common issue${fixCount > 1 ? 's' : ''}`)
+  }
+  
+  // ── Step 2: Identify which files have errors ──
+  const errorFilePaths = extractErrorFiles(buildLogs)
+  console.log(`[fix] Error files from logs:`, errorFilePaths)
+  
+  if (errorFilePaths.length === 0) {
+    // Logs didn't give us specific files — try to fix based on error patterns
+    // but still don't send the whole app
+    const compressedLogs = compressError(buildLogs)
+    if (!compressedLogs.trim()) {
+      console.warn('[fix] No actionable errors found in build logs')
+      return deterministicFixed
+    }
+    // Fall through to AI fix with all files but compressed context
+  }
+  
+  // ── Step 3: Build minimal context for AI ──
+  // Only the broken files, not the entire 15-20 file app
+  const brokenFiles = errorFilePaths.length > 0
+    ? deterministicFixed.filter(f => 
+        errorFilePaths.some(ef => f.path === ef || f.path.endsWith(ef) || ef.endsWith(f.path))
+      )
+    : deterministicFixed // Fallback: if we couldn't parse error files, send all (rare)
+  
+  // If no broken files matched, it might be a missing file error — send the files
+  // referenced in imports that don't exist
+  if (brokenFiles.length === 0) {
+    console.warn('[fix] No matching broken files found, using full file set')
+    // But still limit to first 8 files to keep context manageable
+    const limitedFiles = deterministicFixed.slice(0, 8)
+    return await _doAIFix(deterministicFixed, limitedFiles, buildLogs, onProgress)
+  }
+  
+  return await _doAIFix(deterministicFixed, brokenFiles, buildLogs, onProgress)
+}
+
+async function _doAIFix(
+  allFiles: Array<{ path: string; content: string }>,
+  brokenFiles: Array<{ path: string; content: string }>,
+  buildLogs: string,
+  onProgress?: (msg: string) => void
+): Promise<Array<{ path: string; content: string }>> {
+  const compressedLogs = compressError(buildLogs)
+  
+  // Also provide a file manifest so the AI knows what files exist
+  // (helps it fix "Module not found" errors)
+  const fileManifest = allFiles.map(f => f.path).join('\n')
+  
+  const systemPrompt = `You are an expert Next.js/TypeScript compiler error fixer.
+The user's app failed the Vercel build. You will receive ONLY the files with errors and the error logs.
+
+FIX RULES:
+- Return ONLY the fixed files using <maya-write path="...">...</maya-write> tags.
+- Return the ENTIRE corrected file content for each broken file.
+- Do NOT return files that don't have errors.
+- Do NOT add new files.
+- Do NOT change the app's functionality — only fix compiler errors.
+- All imports must reference files that exist in the FILE MANIFEST below.
+- "use client"; must be quoted and at the very first line if the file uses hooks/events.
+- Only import lucide-react icons that you actually use in JSX.
+- Use 'next/navigation' not 'next/router' for App Router.
+- Do NOT use h-screen, use min-h-[100dvh].
+- Do NOT use eslint config in next.config.js.
+- No commentary, no markdown, no explanation — ONLY <maya-write> tags.
+
+FILE MANIFEST (all files in this app):
+${fileManifest}`
+
+  const brokenFilesContext = brokenFiles.map(f => `--- ${f.path} ---\n${f.content}`).join('\n\n')
+  
+  const userPrompt = `BUILD ERRORS:\n${compressedLogs}\n\nBROKEN FILES TO FIX:\n${brokenFilesContext}`
 
   try {
+    onProgress?.(`AI fixing ${brokenFiles.length} file${brokenFiles.length > 1 ? 's' : ''}...`)
+    
     const result = await nimChat({
-      model: MODELS.FIX_ROUTER,
+      model: { ...MODELS.FIX_ROUTER, maxTokens: 12288 },
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      maxTokensOverride: 8192,
     })
 
     const { parseModelOutput } = await import('./tags')
     const ops = parseModelOutput(result)
     const fixedFiles = ops.filter(op => op.type === 'write').map(op => ({ path: op.path, content: op.content || '' }))
     
-    // Merge fixed files into original
+    // Merge fixed files into the FULL original set
     if (fixedFiles.length > 0) {
-      const newFiles = [...files]
+      console.log(`[fix] AI fixed ${fixedFiles.length} file(s): ${fixedFiles.map(f => f.path).join(', ')}`)
+      onProgress?.(`AI fixed ${fixedFiles.length} file${fixedFiles.length > 1 ? 's' : ''}`)
+      
+      const merged = [...allFiles]
       for (const fixed of fixedFiles) {
-        const idx = newFiles.findIndex(f => f.path === fixed.path)
-        if (idx !== -1) newFiles[idx] = fixed
-        else newFiles.push(fixed)
+        const idx = merged.findIndex(f => f.path === fixed.path)
+        if (idx !== -1) {
+          merged[idx] = fixed
+        } else {
+          // AI created a missing file that was referenced but didn't exist
+          merged.push(fixed)
+        }
       }
-      return sanitizeFiles(newFiles)
+      return sanitizeFiles(merged)
     }
-    return files
+    
+    console.warn('[fix] AI returned no fixed files')
+    return allFiles
   } catch (e) {
-    console.error('[fixVercelBuildErrors] Error during fix:', e)
-    return files // Return original if fix fails
+    console.error('[fixVercelBuildErrors] Error during AI fix:', e)
+    return allFiles // Return deterministic fixes at minimum
   }
-}
+}
