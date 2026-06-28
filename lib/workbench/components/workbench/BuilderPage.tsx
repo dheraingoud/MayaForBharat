@@ -239,6 +239,10 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
   // Build the transport body dynamically so it picks up latest refs
   const transportBodyRef = useRef<() => object>(() => ({}))
+  // Hidden pipeline suffix (model tag + plan context + mandatory pipeline block)
+  // — cleared after each send so retries that re-read `retryRef.current.lastUserMsg`
+  // don't double-inject the same suffix. The chat UI never sees this content.
+  const pipelineInstructionsRef = useRef<string>('')
   transportBodyRef.current = () => ({
     apiKeys,
     files: filesRef.current,
@@ -246,6 +250,8 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     promptId,
     contextOptimization: contextOptimizationEnabled,
     chatMode: 'build' as const,
+    pipelineInstructions: pipelineInstructionsRef.current || undefined,
+    appId: appIdRef.current || undefined,
   })
 
   // AI SDK v6: api/body moved onto a transport object (top-level keys are ignored).
@@ -1006,13 +1012,33 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     const pipelineInst = `\n\n--- MANDATORY BUILD PIPELINE (run in exact order, never skip a step) ---\nAfter writing ALL source files, execute this EXACT sequence in boltAction shell/start tags:\n1. \`<boltAction type=\"shell\">npm install</boltAction>\`\n2. \`<boltAction type=\"shell\">npm run build</boltAction>\`\n3. \`<boltAction type=\"shell\">npx vitest run --reporter=verbose 2>&amp;1 || true</boltAction>\`\n4. \`<boltAction type=\"start\">npm run dev</boltAction>\`\n\nYou MUST NOT stop or explain anything until all 4 steps have completed. The first version is not done until build passes, tests pass, dev server starts, and all pages render correctly.`
     const apiUserText = `[Model: ${resolvedModel}]\n\n[Provider: ${resolvedProvider}]\n\n${prompt}${planContext}${pipelineInst}`
 
-    // Track for auto-retry
+    //
+    // PIPELINE-LEAK FIX (handout §2.2 — partially reverted disk state):
+    // The user-visible chat bubble must ONLY contain `${prompt}`. Model tag,
+    // plan-context block, and the MANDATORY BUILD PIPELINE block all ride on
+    // `pipelineInstructionsRef` and the server's chat route appends them to
+    // the LLM-bound message after stripping them from the chat UI append path.
+    // We compute `visibleText` here as the bare prompt and pass it to
+    // `trackedSendMessage`; the full augmented text (`apiUserText`) is kept
+    // ONLY in `retryRef.current.lastUserMsg` so retries stay byte-identical.
+    const visibleText = `${prompt}`
+    const hiddenSuffix =
+      `[Model: ${resolvedModel}]\n\n[Provider: ${resolvedProvider}]\n\n` +
+      `${planContext || ''}${pipelineInst}`.replace(/\n{3,}/g, '\n\n')
+
+    // Track for auto-retry — uses augmented text so retries reproduce the same
+    // request payload (model tag + plan + pipeline ride here, NOT the chat).
     retryRef.current.lastUserMsg = apiUserText
     retryRef.current.count = 0
 
-    // Small delay to let the plan message render first, then send
+    // Hand hidden suffix to the server via the transport body resolver — server
+    // appends the suffix to the last user message in chat/route.ts L175-L192.
+    pipelineInstructionsRef.current = hiddenSuffix
+
+    // Send only the bare prompt; chat UI shows just the prompt, server gets
+    // the suffix out-of-band.
     setTimeout(() => {
-      trackedSendMessage({ text: apiUserText })
+      trackedSendMessage({ text: visibleText })
     }, planAssistantMsg ? 400 : 100)
   }, [searchParams])
 

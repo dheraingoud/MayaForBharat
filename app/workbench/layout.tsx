@@ -27,7 +27,20 @@ export default function WorkbenchLayout({
   }, []);
 
   return (
-    <div className="workbench-layout bg-bolt-elements-bg-depth-1" data-theme="dark" style={{ height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div
+      className="workbench-layout bg-bolt-elements-bg-depth-1"
+      data-theme="dark"
+      style={{
+        height: '100vh',
+        width: '100%',
+        maxWidth: '100vw',
+        minWidth: 0,
+        overflow: 'hidden',
+        position: 'relative',
+        isolation: 'isolate',
+        contain: 'layout paint',
+      }}
+    >
       {children}
       <ToastContainer
         position="bottom-right"

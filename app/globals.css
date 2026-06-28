@@ -142,6 +142,9 @@
 }
 
 @layer base {
+  html, body {
+    overflow-x: clip; /* prevent any internal element from forcing horizontal scroll */
+  }
   body {
     @apply bg-[#F5F4F0] text-[#1A1917];
     font-feature-settings: 'kern' 1, 'liga' 1;

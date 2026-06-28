@@ -42,6 +42,23 @@ export const removeByAppId = mutation({
   },
 })
 
+// ADMIN — wipes every app row. Used by /api/admin/reset for hard-reset.
+export const removeAllApps = mutation({
+  args: { confirm: v.string() },
+  handler: async (ctx, { confirm }) => {
+    if (confirm !== "RESET_APPS") {
+      throw new Error("refusing — pass confirm='RESET_APPS'")
+    }
+    const rows = await ctx.db.query("apps").collect()
+    let count = 0
+    for (const row of rows) {
+      await ctx.db.delete(row._id)
+      count++
+    }
+    return { deleted: count }
+  },
+})
+
 // ── Mutations ────────────────────────────────────────
 
 export const create = mutation({
