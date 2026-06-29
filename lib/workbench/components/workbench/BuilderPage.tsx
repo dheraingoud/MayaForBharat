@@ -1299,32 +1299,47 @@ export function BuilderPage({ appId }: BuilderPageProps) {
           // artifacts and file actions in the WebContainer for preview restoration
           setTimeout(() => replayMessages(uiMessages), 100)
         }
-
-        // Inject synthetic prompt + plan messages when chat is empty but we have
-        // a stored plan or incoming ?prompt=. Resolves the "prompt appears AFTER
-        // plan" UX bug — the user's prompt is always the FIRST chat message.
-        try {
-          const storedPlan = typeof f.specJson === 'string' && f.specJson.trim() ? (JSON.parse(f.specJson) as any) : null
-          const urlPrompt = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('prompt') : null
-          if (messages.length === 0 && (storedPlan || urlPrompt)) {
-            const planBlock = storedPlan
-              ? '## ' + (storedPlan.name || 'App plan') + '\n\n' +
-                (storedPlan.description || '') + '\n\n' +
-                '**Features:**\n' + ((Array.isArray(storedPlan.features) ? storedPlan.features : []).map(function (x: string) { return '- ' + x }).join('\n')) + '\n\n' +
-                '**Tech stack:** ' + ((Array.isArray(storedPlan.techStack) ? storedPlan.techStack : []).join(', '))
-              : 'Generation in progress — files will appear here once the build completes.'
-            const synth: UIMessage[] = [
-              { id: 'synth-prompt-' + Date.now(), role: 'user', parts: [{ type: 'text' as const, text: urlPrompt || storedPlan && storedPlan.name || 'Build your app' }] },
-              { id: 'synth-plan-' + Date.now(), role: 'assistant', parts: [{ type: 'text' as const, text: planBlock }] },
-            ]
-            setMessages(synth)
-            logger.info(`Injected ${synth.length} synthetic chat messages (prompt + plan)`)
-          }
-        } catch (e) { logger.warn('[plan] synthetic inject skipped:', e) }
       }
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }
+
+  // ── Synthetic chat priming ──────────────────────────────────────────────────
+  // Runs ONCE per appId when the chat thread starts empty but we still have a
+  // stored plan (apps.specJson) or an incoming ?prompt=. Ensures the user's
+  // original prompt appears as the first chat message and the plan as the next
+  // assistant message — never again the assistant plan rendering above the
+  // user's still-pending prompt.
+  const primedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!app || !appIdRef.current) return
+    if (primedRef.current === appIdRef.current) return
+    if (messages.length > 0) {
+      primedRef.current = appIdRef.current
+      return
+    }
+    const spec = typeof app.specJson === 'string' && app.specJson.trim() ? (JSON.parse(app.specJson) as any) : null
+    const urlPrompt = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('prompt') : null
+    if (!spec && !urlPrompt) return
+    try {
+      const planBlock = spec
+        ? '## ' + (spec.name || 'App plan') +
+          '\n\n' + (spec.description || '') +
+          '\n\n**Features:**\n' + ((Array.isArray(spec.features) ? spec.features : []).map(function (x: string) { return '- ' + x }).join('\n')) +
+          '\n\n**Tech stack:** ' + ((Array.isArray(spec.techStack) ? spec.techStack : []).join(', '))
+        : 'Generation in progress — files will appear here once the build completes.'
+      const promptText = urlPrompt || (spec && spec.name) || 'Build your app'
+      const synth: UIMessage[] = [
+        { id: 'synth-prompt-' + Date.now(), role: 'user', parts: [{ type: 'text' as const, text: promptText }] },
+        { id: 'synth-plan-' + Date.now(), role: 'assistant', parts: [{ type: 'text' as const, text: planBlock }] },
+      ]
+      setMessages(synth)
+      primedRef.current = appIdRef.current
+      logger.info(`[plan] primed ${synth.length} synthetic chat messages for ${appIdRef.current}`)
+    } catch (e) {
+      logger.warn('[plan] synthetic priming skipped:', (e as Error).message)
+    }
+  }, [app, messages.length])
 
   const handleRename = async () => {
     if (!renameValue.trim() || !app) return
