@@ -34,6 +34,7 @@ export interface BuiltApp {
   shownToOwner?: boolean
   messages?: AppMessage[]
   files: Array<{ path: string; content: string }>
+  specJson?: string | null
 }
 
 function getAppDir(id: string): string {

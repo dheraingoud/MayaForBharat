@@ -49,13 +49,26 @@ export const removeAllApps = mutation({
     if (confirm !== "RESET_APPS") {
       throw new Error("refusing — pass confirm='RESET_APPS'")
     }
-    const rows = await ctx.db.query("apps").collect()
+    // Cascade: improvements + evolutionLog have indexed refs to apps.
+    // generateJobs uses string appId (no FK). Wipe deepest first.
+    const improvements = await ctx.db.query("improvements").collect()
+    for (const row of improvements) await ctx.db.delete(row._id)
+    const evolution = await ctx.db.query("evolutionLog").collect()
+    for (const row of evolution) await ctx.db.delete(row._id)
+    const jobs = await ctx.db.query("generateJobs").collect()
+    for (const row of jobs) await ctx.db.delete(row._id)
+    const apps = await ctx.db.query("apps").collect()
     let count = 0
-    for (const row of rows) {
+    for (const row of apps) {
       await ctx.db.delete(row._id)
       count++
     }
-    return { deleted: count }
+    return {
+      deleted: count,
+      improvements: improvements.length,
+      evolutionLog: evolution.length,
+      generateJobs: jobs.length,
+    }
   },
 })
 

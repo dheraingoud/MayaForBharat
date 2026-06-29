@@ -54,6 +54,7 @@ export async function GET(
         adminPin: app.adminPin,
         shownToOwner: app.shownToOwner,
         messages: app.messages || [],
+        specJson: app.specJson || null,
         evolutionCount,
         hasPendingImprovements,
       }

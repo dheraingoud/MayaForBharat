@@ -96,6 +96,7 @@ interface AppData {
   category: string; url: string; projectId: string
   createdAt: string; status: 'live' | 'building' | 'preview'
   version?: number
+  specJson?: string | null
 }
 
 interface BuilderPageProps {
@@ -1277,7 +1278,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       }
       const { app: f } = await r.json()
       if (f) {
-        setApp({ id: f.id, name: f.name, nameHindi: f.nameHindi, descriptionEn: f.descriptionEn, category: f.category, url: f.url || '', projectId: f.projectId || '', createdAt: f.createdAt || new Date().toISOString(), status: f.status || 'live', version: f.version || 1 })
+        setApp({ id: f.id, name: f.name, nameHindi: f.nameHindi, descriptionEn: f.descriptionEn, category: f.category, url: f.url || '', projectId: f.projectId || '', createdAt: f.createdAt || new Date().toISOString(), status: f.status || 'live', version: f.version || 1, specJson: f.specJson || null })
 
         // SYNC: Mark this app as already saved so persistence effect does UPDATE not CREATE
         appIdRef.current = f.id || appId
