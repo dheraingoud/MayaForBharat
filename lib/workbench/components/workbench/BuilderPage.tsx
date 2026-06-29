@@ -1298,6 +1298,28 @@ export function BuilderPage({ appId }: BuilderPageProps) {
           // artifacts and file actions in the WebContainer for preview restoration
           setTimeout(() => replayMessages(uiMessages), 100)
         }
+
+        // Inject synthetic prompt + plan messages when chat is empty but we have
+        // a stored plan or incoming ?prompt=. Resolves the "prompt appears AFTER
+        // plan" UX bug — the user's prompt is always the FIRST chat message.
+        try {
+          const storedPlan = typeof f.specJson === 'string' && f.specJson.trim() ? (JSON.parse(f.specJson) as any) : null
+          const urlPrompt = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('prompt') : null
+          if (messages.length === 0 && (storedPlan || urlPrompt)) {
+            const planBlock = storedPlan
+              ? '## ' + (storedPlan.name || 'App plan') + '\n\n' +
+                (storedPlan.description || '') + '\n\n' +
+                '**Features:**\n' + ((Array.isArray(storedPlan.features) ? storedPlan.features : []).map(function (x: string) { return '- ' + x }).join('\n')) + '\n\n' +
+                '**Tech stack:** ' + ((Array.isArray(storedPlan.techStack) ? storedPlan.techStack : []).join(', '))
+              : 'Generation in progress — files will appear here once the build completes.'
+            const synth: UIMessage[] = [
+              { id: 'synth-prompt-' + Date.now(), role: 'user', parts: [{ type: 'text' as const, text: urlPrompt || storedPlan && storedPlan.name || 'Build your app' }] },
+              { id: 'synth-plan-' + Date.now(), role: 'assistant', parts: [{ type: 'text' as const, text: planBlock }] },
+            ]
+            setMessages(synth)
+            logger.info(`Injected ${synth.length} synthetic chat messages (prompt + plan)`)
+          }
+        } catch (e) { logger.warn('[plan] synthetic inject skipped:', e) }
       }
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
