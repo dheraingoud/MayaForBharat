@@ -29,6 +29,7 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import PhaseStrip from '@/components/PhaseStrip'
 
 // ─── bolt.diy engine ──────────────────────────────────────────────────────────
 import { useStore } from '@nanostores/react'
@@ -1702,6 +1703,19 @@ const ChatPanel = memo((
         initial="smooth"
       >
         <StickToBottom.Content className="flex flex-col gap-2 relative pb-4">
+          {(() => {
+            const s = messages.length > 0 ? 'done' : 'active'
+            const live = isStreaming ? 'active' as const : 'done' as const
+            return (
+              <PhaseStrip
+                phasePlan={'done' as const}
+                phaseSetup={'done' as const}
+                phaseFiles={s as 'done' | 'active' | 'pending'}
+                phaseLive={live}
+                fileCount={0}
+              />
+            )
+          })()}
           {messages.length === 0 && !isStreaming && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="w-11 h-11 rounded-xl bg-[#E8601A]/[0.07] flex items-center justify-center mb-3.5">
