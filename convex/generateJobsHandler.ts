@@ -176,10 +176,21 @@ export async function generateJobsHandler(
               progressNote: `finished with 0 files — raw text saved for diagnosis (${finalText.length} chars)`,
             });
           }
-          await ctx.runMutation(internal.generateJobs.markLive, {
-            jobId,
-            files: parsedFiles,
-          });
+          if (parsedFiles.length === 0) {
+            // No user-visible files were parsed from the LLM output (reasoning-
+            // only, empty output, or malformed boltArtifact tags). Do NOT
+            // markLive with files:[] — that would show a blank workbench with a
+            // success toast. Surface as error so GenerateJobCard offers Retry.
+            await ctx.runMutation(internal.generateJobs.markError, {
+              jobId,
+              error: `no parseable files in LLM output (${finalText.length} chars received)`,
+            });
+          } else {
+            await ctx.runMutation(internal.generateJobs.markLive, {
+              jobId,
+              files: parsedFiles,
+            });
+          }
           didMark = true;
         },
       } as any,
@@ -188,10 +199,17 @@ export async function generateJobsHandler(
     // Belt-and-braces: if onFinish didn't fire (rare), derive final from partial.
     if (!didMark) {
       const fallback = extractBoltFiles(partialText, true);
-      await ctx.runMutation(internal.generateJobs.markLive, {
-        jobId,
-        files: fallback,
-      });
+      if (fallback.length === 0) {
+        await ctx.runMutation(internal.generateJobs.markError, {
+          jobId,
+          error: `no parseable files (onFinish did not fire; ${partialText.length} chars captured)`,
+        });
+      } else {
+        await ctx.runMutation(internal.generateJobs.markLive, {
+          jobId,
+          files: fallback,
+        });
+      }
     }
     return { ok: true, files: parsedFiles.length };
   } catch (e: any) {

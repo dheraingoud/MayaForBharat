@@ -395,5 +395,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Auto-spawn the detached generation job so the build starts immediately on
+  // plan-approve (Phase 1.2 fix for the "come-back stuck Building" gap). Without
+  // this, plan-first apps get an `apps` row with `specJson` but no `generateJobs`
+  // row → BuilderPageWithJob sees no job → renders Builder with synthetic priming
+  // → user stuck on "Building in progress…" forever. Spawned server-side so the
+  // job exists by the time the client redirects to /workbench/[appId].
+  // Errors here are logged but non-fatal — the plan + appId are already saved,
+  // and the user can retry the build from GenerateJobCard.
+  try {
+    await convex.mutation(api.generateJobs.createJob, {
+      appId,
+      prompt,
+      model: bareModel,
+      provider,
+    });
+  } catch (e: any) {
+    logger.error('[plan] generateJobs.createJob failed:', e?.message ?? e);
+  }
+
   return NextResponse.json({ plan, appId, model: bareModel, provider, fallback: usedFallback });
 }

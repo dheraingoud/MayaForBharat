@@ -469,7 +469,28 @@ export class WorkbenchStore {
   }
 
   abortAllActions() {
-    // TODO: what do we wanna do and how do we wanna recover from this?
+    // Abort every in-flight action across all artifacts. Each ActionRunner
+    // action owns an AbortController (see action-runner.ts addAction); calling
+    // `action.abort()` flips its AbortSignal, which the shell/file execution
+    // paths check. Without this the Stop button was a no-op — `npm run build`
+    // kept running in the WebContainer after the user clicked Stop.
+    const artifacts = this.artifacts.get();
+    for (const id of Object.keys(artifacts)) {
+      const artifact = artifacts[id];
+      if (!artifact?.runner) continue;
+      const actions = artifact.runner.actions.get();
+      for (const actionId of Object.keys(actions)) {
+        const action = actions[actionId];
+        if (!action?.abort) continue;
+        if (action.status === 'running' || action.status === 'pending') {
+          try {
+            action.abort();
+          } catch {
+            // best-effort — one aberrant action shouldn't block the rest
+          }
+        }
+      }
+    }
   }
 
   setReloadedMessages(messages: string[]) {

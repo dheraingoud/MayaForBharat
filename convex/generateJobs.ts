@@ -242,10 +242,11 @@ export const markLive = internalMutation({
       error: undefined,
     });
 
-    // Mirror into `apps.fileTree` + `apps.status='building'` so downstream
-    // (Vercel deploy, evolution) sees the newly-built artifact as the
-    // canonical latest state. apps.status remains 'building' here because we
-    // do not run a server-side verify step in this design.
+    // Mirror into `apps.fileTree` + `apps.status='live'` so downstream
+    // (Vercel deploy, evolution, listLiveApps/KAIROS) sees the newly-built
+    // artifact as live and canonical. The detached worker has already
+    // verified files were emitted by the LLM, so 'live' is correct here —
+    // no extra server-side verify step is needed.
     const appsRow = await ctx.db
       .query("apps")
       .withIndex("by_app_id", (q) => q.eq("appId", row.appId))
@@ -253,7 +254,7 @@ export const markLive = internalMutation({
     if (appsRow) {
       await ctx.db.patch(appsRow._id, {
         fileTree: filesJson,
-        status: "building" as const,
+        status: "live" as const,
       });
     }
   },
