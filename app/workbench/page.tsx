@@ -15,7 +15,7 @@ const BuilderPage = dynamic(
 // Loading fallback — matches the builder page dark theme
 function WorkbenchSkeleton() {
   return (
-    <div className="flex flex-col h-[100dvh] w-screen bg-[#111110]">
+    <div className="flex flex-col h-[100dvh] w-full max-w-[100vw] min-w-0 isolate bg-[#111110]">
       {/* Skeleton header */}
       <div className="h-11 flex items-center px-3 border-b border-white/[0.06] bg-[#1A1917] shrink-0">
         <div className="w-[70px] h-5 rounded bg-white/[0.05] animate-pulse" />

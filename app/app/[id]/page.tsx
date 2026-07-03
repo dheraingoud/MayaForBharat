@@ -299,7 +299,7 @@ export default function AppDetailPage() {
   // ═════════════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="h-[100dvh] w-screen bg-[#111110] flex flex-col overflow-hidden text-[#F5F4F0]">
+    <div className="h-[100dvh] w-full max-w-[100vw] min-w-0 isolate bg-[#111110] flex flex-col overflow-hidden text-[#F5F4F0]">
 
       {/* ═══ TOP BAR (44px) ═══════════════════════════════════════════════ */}
       <header className="h-11 flex items-center justify-between px-2.5 border-b border-white/[0.06] bg-[#1A1917] shrink-0 z-30">

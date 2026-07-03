@@ -201,8 +201,25 @@ export function BuilderPageWithJob({
     });
   }, [job.status, job._id, job.files, appId]);
 
-  // ── Render: card first, then defer to the existing BuilderPage once live.
-  if (job.status !== 'live') {
+  // ── Render:
+  //   - An in-flight build (pending/building) that is *expected* — we have a
+  //     ?prompt= from a fresh approve, or an existing job row → GenerateJobCard.
+  //   - A finished-but-failed job (error/cancelled) with a row to retry → card.
+  //   - Otherwise → mount BuilderPage. This covers BOTH the live-files path
+  //     AND the "come-back later" path where the user reopens an app that has
+  //     an `apps` row + specJson but NO live generateJobs row (apps created via
+  //     /api/apps-from-plan don't mint a generateJobs row). On that path
+  //     BuilderPage's synthetic priming effect injects [user-prompt, plan] and
+  //     the progressive chat actually renders, instead of being stuck on the
+  //     loading card forever (the prior session's #1 blocker).
+  const buildingInProgress =
+    (job.status === 'pending' || job.status === 'building') &&
+    (!!prompt || !!job._id);
+  const showCard =
+    buildingInProgress ||
+    (!!job._id && (job.status === 'error' || job.status === 'cancelled'));
+
+  if (showCard) {
     return (
       <GenerateJobCard
         appId={appId}

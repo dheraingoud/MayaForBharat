@@ -236,7 +236,7 @@ export const WorkbenchLayout = memo(() => {
   }, [showTerminal]);
 
   return (
-    <div className="h-[100dvh] w-screen bg-[#111110] flex flex-col overflow-hidden text-[#F5F4F0]">
+    <div className="h-[100dvh] w-full max-w-[100vw] min-w-0 isolate bg-[#111110] flex flex-col overflow-hidden text-[#F5F4F0]">
       {/* ═══ HEADER ═══════════════════════════════════════════════════ */}
       <WorkbenchHeader
         viewport={viewport}

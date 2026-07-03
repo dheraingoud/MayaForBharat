@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
     // Each attempt races a hard timeout — if the provider stalls we abort and
     // fall through to the next attempt (or to a heuristic fallback plan).
     const tryOnce = async (
-      overrides: { temperature?: number; reminder?: string; timeoutMs?: number },
+      overrides: { temperature?: number; reminder?: string; timeoutMs?: number; maxOutputTokens?: number },
       signal: AbortSignal,
     ) => {
       const model = createNimModel(bareModel);
@@ -214,10 +214,12 @@ export async function POST(req: NextRequest) {
           { role: 'system', content: PLAN_SYSTEM_PROMPT },
           { role: 'user', content: userContent },
         ],
-        // 700 tokens (~2800 chars) — ample for a 600-1000 char plan JSON.
-        // Smaller budgets short-circuit stepfun's verbose reasoning and let
-        // us return faster. We bump to 1500 on second attempt below.
-        maxOutputTokens: 700,
+        // Reasoning models (deepseek-v4-flash et al) emit many reasoning tokens
+        // BEFORE the answer; 700 truncated them to length=0 output -> heuristic
+        // fallback (the "truth not heuristics" complaint). Give headroom by
+        // default; the 2nd (reminder, temp=0) attempt below passes a larger
+        // budget explicitly. Well under all catalog models' 16384 cap.
+        maxOutputTokens: overrides.maxOutputTokens ?? 2048,
         temperature: overrides.temperature ?? 0.7,
         abortSignal: signal,
       });
@@ -291,6 +293,7 @@ export async function POST(req: NextRequest) {
           reminder:
             'Reply with ONLY a single raw JSON object matching the system schema. ' +
             'No prose, no markdown fences, no commentary, no trailing text.',
+          maxOutputTokens: 4096,
         },
         secondAbort.signal,
       ),
