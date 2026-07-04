@@ -13,15 +13,33 @@ import type {
   FileUIPart,
   StepStartUIPart,
 } from 'ai';
+import { MessageActions } from './MessageActions';
+import { MessageEditor } from './MessageEditor';
 
 interface UserMessageProps {
   content: string | Array<{ type: string; text?: string; image?: string }>;
   parts:
     | (TextUIPart | ReasoningUIPart | ToolUIPart | SourceUrlUIPart | FileUIPart | StepStartUIPart)[]
     | undefined;
+  messageId?: string;
+  /** M2 in-place edit — driven by editingId state in Messages.client. */
+  isEditing?: boolean;
+  onStartEdit?: () => void;
+  onSaveEdit?: (text: string) => void;
+  onCancelEdit?: () => void;
+  language?: 'hi' | 'en';
 }
 
-export function UserMessage({ content, parts }: UserMessageProps) {
+export function UserMessage({
+  content,
+  parts,
+  messageId,
+  isEditing = false,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+  language = 'en',
+}: UserMessageProps) {
   // AI SDK v4: content may be empty, actual text lives in parts[].text
   // Normalize: extract text from parts if content is empty
   const resolvedContent = resolveContent(content, parts);
@@ -37,8 +55,22 @@ export function UserMessage({ content, parts }: UserMessageProps) {
     const textItem = resolvedContent.find((item) => item.type === 'text');
     const textContent = stripMetadata(textItem?.text || '');
 
+    // M2: in-place edit swap — editor replaces the bubble while editing.
+    if (isEditing) {
+      return (
+        <div className="w-full">
+          <MessageEditor
+            initialText={textContent}
+            onSave={(t) => onSaveEdit?.(t)}
+            onCancel={() => onCancelEdit?.()}
+            language={language}
+          />
+        </div>
+      );
+    }
+
     return (
-      <div className="overflow-hidden flex flex-col gap-2 items-end">
+      <div className="overflow-hidden flex flex-col gap-1.5 items-end">
         {/* User message bubble — double-bezel (outer ring shell + inner core) */}
         <div
           className="p-[1px] w-fit max-w-[85%] rounded-2xl rounded-br-md ring-1 ring-[#E8601A]/10"
@@ -63,43 +95,77 @@ export function UserMessage({ content, parts }: UserMessageProps) {
             ))}
           </div>
         </div>
+        {onStartEdit && (
+          <MessageActions
+            role="user"
+            messageId={messageId}
+            parts={parts}
+            onEdit={onStartEdit}
+            language={language}
+          />
+        )}
       </div>
     );
   }
 
   const textContent = stripMetadata(typeof resolvedContent === 'string' ? resolvedContent : '');
 
-  return (
-    <div
-      className="p-[1px] w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] ring-1 ring-[#E8601A]/10"
-      style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)' }}
-    >
-      <div
-        className="px-4 py-2.5 rounded-[calc(1rem-1px)] rounded-br-md text-[14px] leading-relaxed"
-        style={{
-          background: 'rgba(232, 96, 26, 0.04)',
-          color: '#F5F4F0',
-        }}
-      >
-        {images.length > 0 && (
-          <div className="flex gap-3.5 mb-2">
-            {images.map((item, index) => (
-              <div className="relative flex rounded-lg border border-white/[0.08] overflow-hidden">
-                <div className="h-16 w-16 bg-transparent outline-none">
-                  <img
-                    key={index}
-                    src={item.url}
-                    alt={`Image ${index + 1}`}
-                    className="h-full w-full rounded-lg"
-                    style={{ objectFit: 'fill' }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <span>{textContent}</span>
+  // M2: in-place edit swap — editor replaces the bubble while editing.
+  if (isEditing) {
+    return (
+      <div className="w-full">
+        <MessageEditor
+          initialText={textContent}
+          onSave={(t) => onSaveEdit?.(t)}
+          onCancel={() => onCancelEdit?.()}
+          language={language}
+        />
       </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 items-end w-full">
+      <div
+        className="p-[1px] w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] ring-1 ring-[#E8601A]/10"
+        style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)' }}
+      >
+        <div
+          className="px-4 py-2.5 rounded-[calc(1rem-1px)] rounded-br-md text-[14px] leading-relaxed"
+          style={{
+            background: 'rgba(232, 96, 26, 0.04)',
+            color: '#F5F4F0',
+          }}
+        >
+          {images.length > 0 && (
+            <div className="flex gap-3.5 mb-2">
+              {images.map((item, index) => (
+                <div className="relative flex rounded-lg border border-white/[0.08] overflow-hidden">
+                  <div className="h-16 w-16 bg-transparent outline-none">
+                    <img
+                      key={index}
+                      src={item.url}
+                      alt={`Image ${index + 1}`}
+                      className="h-full w-full rounded-lg"
+                      style={{ objectFit: 'fill' }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <span>{textContent}</span>
+        </div>
+      </div>
+      {onStartEdit && (
+        <MessageActions
+          role="user"
+          messageId={messageId}
+          parts={parts}
+          onEdit={onStartEdit}
+          language={language}
+        />
+      )}
     </div>
   );
 }

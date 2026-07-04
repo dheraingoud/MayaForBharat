@@ -4,7 +4,6 @@ import { Markdown } from './Markdown';
 import type { JSONValue } from 'ai';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
 import { WORK_DIR } from '@/lib/workbench/utils/constants';
-import WithTooltip from '@/lib/workbench/components/ui/Tooltip';
 import type { UIMessage } from 'ai';
 import type { ProviderInfo } from '@/lib/workbench/types/model';
 import type {
@@ -19,6 +18,7 @@ import { ToolInvocations } from './ToolInvocations';
 import type { ToolCallAnnotation } from '@/lib/workbench/types/context';
 import ThoughtBox from './ThoughtBox';
 import { BuildErrorCard } from './BuildErrorCard';
+import { MessageActions } from './MessageActions';
 
 interface AssistantMessageProps {
   content: string;
@@ -141,18 +141,18 @@ export const AssistantMessage = memo(
 
           {/* Message content area */}
           <div className="flex-1 min-w-0">
-            {/* Rewind action — subtle, visible on hover, hidden during streaming */}
-            {onRewind && messageId && !isStreaming && (
-              <div className="flex items-center gap-1 mb-0.5 opacity-0 hover:opacity-100 transition-opacity">
-                <WithTooltip tooltip="Revert to this message">
-                  <button
-                    onClick={() => onRewind(messageId)}
-                    className="p-0.5 rounded text-[#4A4742] hover:text-[#E8601A] hover:bg-[#E8601A]/[0.06] transition-colors"
-                  >
-                    <div className="i-ph:arrow-u-up-left w-3 h-3" />
-                  </button>
-                </WithTooltip>
-              </div>
+            {/* M2: hover-reveal action bar (vercel message-actions port, MAYA
+                tokens + Phosphor). Replaces the lone rewind button — rewind
+                is now one of the actions. Hidden while streaming. */}
+            {messageId && !isStreaming && (
+              <MessageActions
+                role="assistant"
+                messageId={messageId}
+                parts={parts}
+                isLoading={isStreaming}
+                onRewind={onRewind ? () => onRewind(messageId) : undefined}
+                language={language}
+              />
             )}
 
             {/* ─── Interleaved rendering: thinking → response → thinking → response ─── */}

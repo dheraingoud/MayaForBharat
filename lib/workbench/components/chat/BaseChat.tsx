@@ -75,6 +75,10 @@ interface BaseChatProps {
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
   append?: (message: UIMessage) => void;
+  /** M2: re-roll the last assistant turn (from useChat). Threaded to <Messages>. */
+  regenerate?: () => void;
+  /** M2: in-place user-message edit needs setMessages to truncate+resend. */
+  setMessages?: (messages: UIMessage[]) => void;
   designScheme?: DesignScheme;
   setDesignScheme?: (scheme: DesignScheme) => void;
   selectedElement?: ElementInfo | null;
@@ -125,6 +129,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       chatMode,
       setChatMode,
       append,
+      regenerate,
+      setMessages,
       designScheme,
       setDesignScheme,
       selectedElement,
@@ -371,6 +377,8 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                       messages={messages}
                       isStreaming={isStreaming}
                       append={append}
+                      regenerate={regenerate}
+                      setMessages={setMessages}
                       chatMode={chatMode}
                       setChatMode={setChatMode}
                       provider={provider}

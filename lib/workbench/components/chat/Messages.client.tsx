@@ -12,8 +12,9 @@ import { detectLanguage } from '@/lib/workbench/utils/detectLanguage';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
 import { DynamicStatusPill } from './DynamicStatusPill';
+import { Greeting } from './Greeting';
 import { toast } from 'react-toastify';
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import type { ForwardedRef } from 'react';
 import { motion } from 'framer-motion';
 import type { ProviderInfo } from '@/lib/workbench/types/model';
@@ -37,6 +38,9 @@ interface MessagesProps {
   messages?: UIMessage[];
   setMessages?: (messages: UIMessage[]) => void;
   append?: (UIMessage: UIMessage) => void;
+  /** Re-roll the last assistant turn (from useChat). Surfaced as a composer
+   *  Regenerate button in BuilderPage; threaded but optional here. */
+  regenerate?: () => void;
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
   model?: string;
@@ -47,6 +51,30 @@ interface MessagesProps {
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
   (props: MessagesProps, ref: ForwardedRef<HTMLDivElement> | undefined) => {
     const { id, isStreaming = false, messages = [] } = props;
+
+    // ── M2: in-place user-message edit. Idempotent client-side
+    //    deleteTrailingMessages approximation — drop edited msg + trailing,
+    //    then append the edited text as a fresh user turn. append() (from
+    //    useChat via BaseChat/BuilderPage) triggers the assistant re-roll,
+    //    mirroring Chat.client's lander-first-prompt seed+send at :415-438.
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const startEdit = (mid: string) => setEditingId(mid);
+    const cancelEdit = () => setEditingId(null);
+    const saveUserEdit = (mid: string, newText: string) => {
+      const idx = messages.findIndex((m) => m.id === mid);
+      if (idx < 0) return;
+      const truncated = messages.slice(0, idx); // drop edited msg + trailing
+      if (props.setMessages) props.setMessages(truncated);
+      if (props.append) {
+        props.append({
+          id: `${mid}-${Date.now()}`,
+          role: 'user',
+          content: newText,
+          parts: [{ type: 'text' as const, text: newText }],
+        } as UIMessage);
+      }
+      setEditingId(null);
+    };
 
     const handleRewind = (messageId: string) => {
       // Find the index of this message
@@ -71,7 +99,14 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
     return (
       <div id={id} className={props.className} ref={ref}>
         {/* Phase R: centered reading column. Breathing room, fade-up enter. */}
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 relative">
+        {/* M2: empty-state greeting — ported vercel greeting.tsx overlay.
+            Absolute centered, pointer-events-none so the composer keeps focus. */}
+        {messages.length === 0 && !isStreaming && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+            <Greeting language="en" />
+          </div>
+        )}
         {messages.length > 0
           ? messages.map((UIMessage, index) => {
               const { role, id: messageId, parts } = UIMessage;
@@ -111,7 +146,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
               return (
                 <motion.div
                   key={index}
-                  className={classNames('flex w-full', {
+                  className={classNames('flex w-full group/message', {
                     'mt-6': !isFirst,
                     'justify-end': isUserMessage,
                     'justify-start': !isUserMessage,
@@ -131,7 +166,16 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                     'w-full': !isUserMessage,
                   })}>
                     {isUserMessage ? (
-                      <UserMessage content={content} parts={childParts} />
+                      <UserMessage
+                        content={content}
+                        parts={childParts}
+                        messageId={messageId}
+                        isEditing={editingId === messageId}
+                        onStartEdit={() => startEdit(messageId)}
+                        onSaveEdit={(text) => saveUserEdit(messageId, text)}
+                        onCancelEdit={cancelEdit}
+                        language={language}
+                      />
                     ) : (
                       <AssistantMessage
                         content={content}

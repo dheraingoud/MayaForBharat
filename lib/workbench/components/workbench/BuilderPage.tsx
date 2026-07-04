@@ -1714,7 +1714,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
                   sendMessage={sendMessage} handleStop={() => { stop(); chatStore.setKey('aborted', true); workbenchStore.abortAllActions() }}
                   actionAlert={actionAlert} clearAlert={() => workbenchStore.clearAlert()}
                   progressAnnotations={progressAnnotations}
-                  append={append} addToolResult={addToolResultLegacy}
+                  append={append} regenerate={regenerate} addToolResult={addToolResultLegacy}
                   model={model} provider={provider}
                   language={language}
                   mayaTiers={mayaTiers}
@@ -1744,7 +1744,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
                 sendMessage={sendMessage} handleStop={() => { stop(); chatStore.setKey('aborted', true); workbenchStore.abortAllActions() }}
                 actionAlert={actionAlert} clearAlert={() => workbenchStore.clearAlert()}
                 progressAnnotations={progressAnnotations}
-                append={append} addToolResult={addToolResultLegacy}
+                append={append} regenerate={regenerate} addToolResult={addToolResultLegacy}
                 model={model} provider={provider}
                 language={language}
                 mayaTiers={mayaTiers}
@@ -1792,6 +1792,7 @@ interface ChatPanelProps {
   clearAlert: () => void
   progressAnnotations: ProgressAnnotation[]
   append: (message: any) => void
+  regenerate: () => void
   addToolResult: ({ toolCallId, result }: { toolCallId: string; result: any }) => void
   model: string
   provider: ProviderInfo
@@ -1817,7 +1818,7 @@ interface ChatPanelProps {
 const ChatPanel = memo((
   {
     messages, setMessages, isStreaming, input, handleInputChange, sendMessage, handleStop,
-    actionAlert, clearAlert, progressAnnotations, append, addToolResult,
+    actionAlert, clearAlert, progressAnnotations, append, regenerate, addToolResult,
     model, provider, language,
     mayaTiers, selectedTier, setSelectedTier, showTierMenu, setShowTierMenu,
     tierMenuRef, activeTier, setModel, setProvider,
@@ -1972,6 +1973,7 @@ const ChatPanel = memo((
                 setMessages={setMessages}
                 isStreaming={isStreaming}
                 append={append}
+                regenerate={regenerate}
                 chatMode="build"
                 model={model}
                 provider={provider}
@@ -2081,19 +2083,35 @@ const ChatPanel = memo((
                   <button onClick={handleStop} className="p-2 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-500/[0.06] transition-colors shrink-0" title="Stop">
                     <Square className="w-3.5 h-3.5" />
                   </button>
-                ) : hasInput ? (
-                  <motion.button
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.8, opacity: 0 }}
-                    transition={{ duration: 0.12, ease: 'easeOut' }}
-                    onClick={() => sendMessage()}
-                    className="p-1.5 rounded-full bg-[#E8601A] text-white hover:bg-[#C94E12] transition-colors shrink-0"
-                    title="Send"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                  </motion.button>
-                ) : null}
+                ) : (
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {/* M2: Regenerate — re-roll the last assistant turn. Surfaced
+                        from useChat's regenerate (already in scope). Gated: only
+                        when there are messages to re-roll. i-ph:arrow-clockwise. */}
+                    {messages.length > 0 && (
+                      <button
+                        onClick={regenerate}
+                        className="p-2 rounded-lg text-[#9E9890] hover:text-[#E8601A] hover:bg-[#E8601A]/[0.06] transition-colors"
+                        title={language === 'hi' ? 'फिर से जवाब दें' : 'Regenerate response'}
+                      >
+                        <span className="i-ph:arrow-clockwise w-3.5 h-3.5 block" />
+                      </button>
+                    )}
+                    {hasInput && (
+                      <motion.button
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.8, opacity: 0 }}
+                        transition={{ duration: 0.12, ease: 'easeOut' }}
+                        onClick={() => sendMessage()}
+                        className="p-1.5 rounded-full bg-[#E8601A] text-white hover:bg-[#C94E12] transition-colors shrink-0"
+                        title="Send"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </motion.button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
