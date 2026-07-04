@@ -18,6 +18,7 @@ import type {
 import { ToolInvocations } from './ToolInvocations';
 import type { ToolCallAnnotation } from '@/lib/workbench/types/context';
 import ThoughtBox from './ThoughtBox';
+import { BuildErrorCard } from './BuildErrorCard';
 
 interface AssistantMessageProps {
   content: string;
@@ -35,6 +36,10 @@ interface AssistantMessageProps {
   addToolResult: ({ toolCallId, result }: { toolCallId: string; result: any }) => void;
   isStreaming?: boolean;
   language?: 'hi' | 'en';
+  /** Phase B: when true (last assistant message), subscribe to buildErrorCard
+   *  store and render <BuildErrorCard> in-stream instead of leaking the error
+   *  as a synthetic user message. */
+  showBuildError?: boolean;
 }
 
 function openArtifactInWorkbench(filePath: string) {
@@ -131,6 +136,7 @@ export const AssistantMessage = memo(
     addToolResult,
     isStreaming = false,
     language = 'en',
+    showBuildError = false,
   }: AssistantMessageProps) => {
     const filteredAnnotations = (annotations?.filter(
       (annotation: JSONValue) =>
@@ -184,6 +190,20 @@ export const AssistantMessage = memo(
     // (last part in the stream is a reasoning part) — ThoughtBox handles this UI
     const isActivelyReasoning = isStreaming && parts && parts.length > 0 &&
       parts[parts.length - 1].type === 'reasoning';
+
+    // ─── Phase B: subscribe to buildErrorCard store (last assistant msg only).
+    //     The atom is set by BuilderPage's auto-fix loop at the same moment it
+    //     injects the hidden pipelineInstructions; we render the styled card here
+    //     so the user sees the error in-stream instead of in a synthetic user
+    //     bubble. Cleared on unmount / when the store resets.
+    const [buildError, setBuildError] = useState<{
+      command: string; error: string; source: 'terminal' | 'preview';
+      attempt: number; maxAttempts: number;
+    } | undefined>(undefined);
+    useEffect(() => {
+      if (!showBuildError) return;
+      return workbenchStore.buildErrorCard.subscribe((v) => setBuildError(v as any));
+    }, [showBuildError]);
 
     return (
       <div className="overflow-hidden w-full">
@@ -377,6 +397,11 @@ export const AssistantMessage = memo(
                 )}
               </>
             )}
+
+            {/* ─── Phase B: in-chat styled build-error card (replaces leaked
+                synthetic-user error dump). Live as a real assistant surface
+                in the AIDA flow between Desire (tool cards) and Action. */}
+            {!isStreaming && buildError ? <BuildErrorCard {...buildError} /> : null}
 
             {/* Empty response warning — double-bezel alert, bilingual */}
             {!isStreaming && !hasContent && !hasReasoning && !(toolInvocations && toolInvocations.length > 0) && messageId && (

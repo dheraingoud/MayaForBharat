@@ -65,6 +65,16 @@ export class WorkbenchStore {
     attempt: number;
     maxAttempts: number;
   } | undefined> = import.meta.hot?.data.autoFixAlert ?? atom(undefined);
+  // Phase B: surfaced in-chat as a styled <BuildErrorCard>. Set whenever an
+  // auto-fix is triggered (same moment as autoFixAlert). Read by AssistantMessage
+  // to render the card ONCE on the last assistant message, then cleared.
+  buildErrorCard: WritableAtom<{
+    command: string;
+    error: string;
+    source: 'terminal' | 'preview';
+    attempt: number;
+    maxAttempts: number;
+  } | undefined> = import.meta.hot?.data.buildErrorCard ?? atom(undefined);
   modifiedFiles = new Set<string>();
   artifactIdList: string[] = [];
   #globalExecutionQueue = Promise.resolve();
@@ -77,6 +87,7 @@ export class WorkbenchStore {
       import.meta.hot.data.actionAlert = this.actionAlert;
       import.meta.hot.data.supabaseAlert = this.supabaseAlert;
       import.meta.hot.data.deployAlert = this.deployAlert;
+      import.meta.hot.data.buildErrorCard = this.buildErrorCard;
 
       // Ensure binary files are properly preserved across hot reloads
       const filesMap = this.files.get();
@@ -545,6 +556,12 @@ export class WorkbenchStore {
       }
 
       this.autoFixAlert.set(errorContext);
+      // Phase B: also surface the error in-chat as a styled <BuildErrorCard>
+      // (read by the last AssistantMessage). Same payload shape — command,
+      // error, source, attempt, maxAttempts. Cleared when the next stream
+      // starts (see setStreamId / addArtifact) so the card lingers while the
+      // fix runs but doesn't outlive the turn.
+      this.buildErrorCard.set(errorContext);
     };
 
     this.artifacts.setKey(id, {

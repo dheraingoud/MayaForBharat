@@ -145,6 +145,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                         addToolResult={props.addToolResult}
                         isStreaming={isStreaming && index === messages.length - 1}
                         language={language}
+                        showBuildError={index === messages.length - 1}
                       />
                     )}
                   </div>

@@ -370,6 +370,9 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       // CONTINUE_MAX to bound runaway. Reset the counter on any non-length finish.
       if (finishReason !== 'length') {
         continueAttemptRef.current = 0
+        // Phase B: a non-length finish means the stream completed (probably the
+        // auto-fix landed). Clear the in-chat error card so it doesn't linger.
+        workbenchStore.buildErrorCard.set(undefined)
         return
       }
       if (continueAttemptRef.current >= CONTINUE_MAX) {
@@ -840,9 +843,51 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         toastId: 'preview-health',
       })
 
-      const diagMsg = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n*Auto-diagnostics: The dev server was started but no preview appeared after 30 seconds.*\n\nThis usually means there is a compilation error or the dev server crashed silently. Check the code for:\n1. Import errors (missing modules, wrong paths)\n2. Syntax errors\n3. Missing dependencies in package.json\n4. TypeScript type errors\n\nFix all issues, then ALWAYS include the FULL build pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="shell">npm run build</boltAction>\`\n3. \`<boltAction type="shell">npx vitest run --reporter=verbose 2>&1 || true</boltAction>\`\n4. \`<boltAction type="start">npm run dev</boltAction>\`\nDo NOT explain. Just output the boltArtifact with fixed files and run commands.`
+      // ─── Phase B / Phase L: hidden injection (no internals leak) ─────────────
+      // Previously this sent a raw `diagMsg` user message containing literal
+      // `<boltAction>` XML + "Do NOT explain. Just output the boltArtifact"
+      // — exactly the wording that made the model emit raw XML as visible text
+      // (leak #2). Now: user sees a clean bilingual in-chat <BuildErrorCard>
+      // (via workbenchStore.buildErrorCard) + a clean status breadcrumb; the
+      // real diagnostic context rides on pipelineInstructionsRef → server
+      // appends it to the LLM-bound user message (chat/route.ts L178-192) and
+      // it NEVER renders in the chat UI. The model uses its standard bolt
+      // action protocol (already taught by the system prompt) so the streaming
+      // parser consumes artifacts/actions normally.
+      const visibleBreadcrumb = `MAYA is fixing a preview that didn't load (attempt ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})…`
 
-      trackedSendMessage({ text: diagMsg })
+      const hiddenDiagnosticInstruction = [
+        `[Model: ${model}]`,
+        `[Provider: ${provider.name}]`,
+        '',
+        `The dev server was started but no preview appeared after 30 seconds (auto-diagnostic attempt ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES}). This usually means a compilation error or the dev server crashed silently.`,
+        '',
+        'Inspect the code for import errors (missing modules, wrong paths), syntax errors, missing dependencies in package.json, and TypeScript type errors. Fix the underlying source files, then re-emit the artifact using your standard bolt action format so the changes apply. After fixing, include the full pipeline:',
+        '1. install dependencies',
+        '2. build the project',
+        '3. run tests (non-blocking)',
+        '4. start the dev server',
+        'Reduce all errors to zero. Do not explain — emit the artifact directly.',
+      ].join('\n')
+
+      // Surface the styled in-chat error card (Phase B). source='preview'
+      // so the card labels it "preview" not "terminal".
+      workbenchStore.buildErrorCard.set({
+        command: '(preview-health)',
+        error: 'Dev server started but no preview appeared after 30s. Running auto-diagnostics…',
+        source: 'preview',
+        attempt: autoRunAttemptsRef.current,
+        maxAttempts: MAX_AUTO_RUN_CYCLES,
+      })
+
+      if (streamingState.get()) {
+        // Queue for when the current stream ends (same pattern as auto-fix loop).
+        pendingAutoFixRef.current = { breadcrumb: visibleBreadcrumb, hidden: hiddenDiagnosticInstruction }
+      } else {
+        pipelineInstructionsRef.current = hiddenDiagnosticInstruction
+        trackedSendMessage({ text: visibleBreadcrumb })
+        setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
+      }
     }, 30000)
 
     return () => {
