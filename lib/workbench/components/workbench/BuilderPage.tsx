@@ -19,8 +19,8 @@ import {
   ArrowLeft, Loader2, Search,
   Monitor, Tablet, Smartphone, MessageSquare, Eye,
   ChevronDown, Pencil, Settings, Trash2, X, Check,
-  Terminal as TerminalIcon, ArrowUp, Square,
-  Mic, Plus, Globe, Paperclip, GitBranch, Sparkles,
+  Terminal as TerminalIcon,
+  Globe, Paperclip, GitBranch,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { CONTINUE_PROMPT } from '@/lib/workbench/prompts/prompts'
@@ -2012,7 +2012,10 @@ const ChatPanel = memo((
       <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.txt,.md,.json,.csv,.tsx,.ts,.js,.jsx,.html,.css" onChange={handleFileSelect} />
 
       {/* ── Input bar ── */}
-      <div className="shrink-0 border-t border-white/[0.06] bg-[#1A1917]">
+      <div
+        className="shrink-0 bg-[#1A1917]/85 backdrop-blur-[12px]"
+        style={{ maskImage: 'linear-gradient(to bottom, transparent, black 28px)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 28px)' }}
+      >
         <div className="px-3 py-3">
           <div className="bg-[#222120] rounded-2xl ring-1 ring-white/[0.05] focus-within:ring-[#E8601A]/20 transition-all">
             <div className="px-4 pt-3 pb-1">
@@ -2034,7 +2037,7 @@ const ChatPanel = memo((
               <div className="flex items-center gap-0.5">
                 {/* Attach file button */}
                 <button onClick={() => fileInputRef.current?.click()} className="p-2 rounded-lg text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04] transition-colors" title={language === 'hi' ? 'फ़ाइल जोड़ें' : 'Attach file'}>
-                  <Plus className="w-4 h-4" />
+                  <span className="i-ph:plus w-4 h-4 block" />
                 </button>
 
                 {/* Enhance prompt button */}
@@ -2054,14 +2057,14 @@ const ChatPanel = memo((
                   } disabled:opacity-30 disabled:cursor-not-allowed`}
                   title={enhancingPrompt ? 'Enhancing...' : promptEnhanced ? 'Prompt enhanced ✓' : (language === 'hi' ? 'प्रॉम्प्ट सुधारें' : 'Enhance prompt')}
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <span className="i-ph:magic-wand w-4 h-4 block" />
                 </button>
 
                 {/* Model tier selector */}
                 <div className="relative" ref={tierMenuRef}>
                   <button ref={tierBtnRef} onClick={() => setShowTierMenu(!showTierMenu)} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[#9E9890] hover:text-[#D4D0CA] hover:bg-white/[0.04] transition-colors">
                     <span>{activeTier.label}</span>
-                    <ChevronDown className={`w-2.5 h-2.5 transition-transform ${showTierMenu ? 'rotate-180' : ''}`} />
+                    <span className={`i-ph:caret-down-bold w-2.5 h-2.5 block transition-transform ${showTierMenu ? 'rotate-180' : ''}`} />
                   </button>
                 </div>
               </div>
@@ -2075,13 +2078,13 @@ const ChatPanel = memo((
                   className={`p-2 rounded-lg transition-colors ${isRecording ? 'text-red-400 bg-red-500/10 animate-pulse' : isTranscribing ? 'text-amber-400' : hasInput ? 'text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04]' : 'text-[#9E9890] hover:text-[#F5F4F0] hover:bg-white/[0.04]'}`}
                   title={isRecording ? (language === 'hi' ? 'रुकें' : 'Stop recording') : isTranscribing ? (language === 'hi' ? 'लिख रहा है...' : 'Transcribing...') : (language === 'hi' ? 'बोलकर टाइप करें' : 'Voice input')}
                 >
-                  <Mic className="w-4 h-4" />
+                  <span className="i-ph:microphone w-4 h-4 block" />
                 </button>
 
                 {/* Send/Stop */}
                 {isStreaming ? (
                   <button onClick={handleStop} className="p-2 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-500/[0.06] transition-colors shrink-0" title="Stop">
-                    <Square className="w-3.5 h-3.5" />
+                    <span className="i-ph:stop-circle-bold w-3.5 h-3.5 block" />
                   </button>
                 ) : (
                   <div className="flex items-center gap-0.5 shrink-0">
@@ -2107,7 +2110,7 @@ const ChatPanel = memo((
                         className="p-1.5 rounded-full bg-[#E8601A] text-white hover:bg-[#C94E12] transition-colors shrink-0"
                         title="Send"
                       >
-                        <ArrowUp className="w-3.5 h-3.5" />
+                        <span className="i-ph:arrow-up-bold w-3.5 h-3.5 block" />
                       </motion.button>
                     )}
                   </div>
