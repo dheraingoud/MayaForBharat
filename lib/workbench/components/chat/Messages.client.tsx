@@ -11,6 +11,7 @@ import { classNames } from '@/lib/workbench/utils/classNames';
 import { detectLanguage } from '@/lib/workbench/utils/detectLanguage';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
+import { DynamicStatusPill } from './DynamicStatusPill';
 import { toast } from 'react-toastify';
 import { forwardRef } from 'react';
 import type { ForwardedRef } from 'react';
@@ -115,7 +116,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                     'justify-end': isUserMessage,
                     'justify-start': !isUserMessage,
                   })}
-                  initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
+                  initial={{ opacity: 0, y: 12, filter: 'blur(6px)' }}
                   animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                   transition={{
                     type: 'spring',
@@ -153,38 +154,11 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
               );
             })
           : null}
-        {/* Streaming indicator: only show when streaming AND the last message hasn't started rendering yet */}
-        {isStreaming && (messages.length === 0 || messages[messages.length - 1]?.role === 'user') && (
-          <motion.div
-            className="flex items-center gap-3 w-full mt-6"
-            initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            transition={{ type: 'spring', stiffness: 120, damping: 22, duration: 0.6 }}
-          >
-            {/* MAYA avatar — double-bezel (hairline ring + inset highlight, no neon glow) */}
-            <div
-              className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center ring-1 ring-[#E8601A]/20"
-              style={{
-                background: 'linear-gradient(135deg, #E8601A 0%, #C94E12 100%)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
-              }}
-            >
-              <span className="text-white text-[9px] font-bold tracking-tight">M</span>
-            </div>
-            {/* Bilingual reading pill — double-bezel glass, no emoji */}
-            <div
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#E8601A]/[0.04] ring-1 ring-[#E8601A]/12 text-[12px] text-[#6B6560] font-medium"
-              style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}
-            >
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce" style={{ animationDelay: '0ms', animationDuration: '0.8s' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce" style={{ animationDelay: '150ms', animationDuration: '0.8s' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce" style={{ animationDelay: '300ms', animationDuration: '0.8s' }} />
-              </span>
-              <span>{'MAYA is reading your prompt…'}</span>
-            </div>
-          </motion.div>
-        )}
+        {/* Phase R2: single authoritative DynamicIsland status pill — owns
+            reading/thinking/writing/running/done. Folds in the old 3-dot
+            reading placeholder + the duplicate inline status pill (deleted
+            from AssistantMessage). Mounts once at end of assistant column. */}
+        <DynamicStatusPill isStreaming={isStreaming} messages={messages} />
         </div>
       </div>
     );

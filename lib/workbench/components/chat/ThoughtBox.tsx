@@ -44,24 +44,14 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
         {/* Brain icon — gentle pulse while thinking, static when done (no emoji) */}
         <div className={`i-ph:brain w-3 h-3 thought-sparkle ${isStreaming ? 'brain-pulse' : ''}`} />
 
-        {/* Label — smoothly changes in place */}
-        <span className="thought-label">
-          {isStreaming
-            ? (language === 'hi' ? 'Soch rahi hoon' : 'Thinking')
-            : (language === 'hi' ? `${thinkDuration || 1} sec mein socha` : `Thought for ${thinkDuration || 1}s`)}
-        </span>
-
-        {/* Animated dots — only during thinking, fades out when done */}
-        <span className={`thought-dots ${isStreaming ? 'dots-visible' : 'dots-hidden'}`}>
-          <span className="dot" style={{ animationDelay: '0ms' }}>.</span>
-          <span className="dot" style={{ animationDelay: '200ms' }}>.</span>
-          <span className="dot" style={{ animationDelay: '400ms' }}>.</span>
-        </span>
-
-        {/* Live duration counter — only during active thinking */}
-        <span className={`thought-elapsed ${isStreaming && thinkDuration > 0 ? 'elapsed-visible' : 'elapsed-hidden'}`}>
-          {thinkDuration}s
-        </span>
+        {/* Label — only when done ("Thought for Xs"). During streaming the
+            DynamicStatusPill owns the "Reasoning" headline, so this pill is
+            just the brain icon + chevron affordance (click to expand). */}
+        {!isStreaming && (
+          <span className="thought-label">
+            {language === 'hi' ? `${thinkDuration || 1} sec mein socha` : `Thought for ${thinkDuration || 1}s`}
+          </span>
+        )}
 
         {/* Chevron — always visible so the buffered reasoning is expandable
             mid-stream too (content is buffered, safe to reveal live). */}

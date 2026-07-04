@@ -66,61 +66,6 @@ function normalizedFilePath(path: string) {
   return normalizedPath;
 }
 
-/**
- * Derive a human-readable status message from the content being streamed.
- * This gives the user visibility into what the model is doing for ALL models,
- * not just reasoning models.
- */
-type StreamStatusKey =
-  | 'thinking'
-  | 'writing'
-  | 'running'
-  | 'starting'
-  | 'generating'
-  | 'responding'
-  | 'working';
-
-function deriveStreamStatusKey(content: string): StreamStatusKey {
-  if (!content || content.length === 0) return 'thinking';
-  if (content.match(/<boltAction[^>]*filePath="([^"]+)"[^>]*>(?![\s\S]*<\/boltAction>)/)) return 'writing';
-  if (content.match(/<boltAction[^>]*type="shell"[^>]*>(?![\s\S]*<\/boltAction>)/)) return 'running';
-  if (content.match(/<boltAction[^>]*type="start"[^>]*>(?![\s\S]*<\/boltAction>)/)) return 'starting';
-  if (content.includes('<boltArtifact') && !content.includes('</boltArtifact>')) return 'generating';
-  if (content.trim().length > 0 && !content.includes('<boltArtifact')) return 'responding';
-  return 'working';
-}
-
-const STATUS_LABEL: Record<'hi' | 'en', Record<StreamStatusKey, string>> = {
-  en: {
-    thinking: 'Thinking...',
-    writing: 'Writing {file}...',
-    running: 'Running command...',
-    starting: 'Starting app...',
-    generating: 'Generating code...',
-    responding: 'Responding...',
-    working: 'Working...',
-  },
-  hi: {
-    thinking: 'Soch rahi hoon...',
-    writing: '{file} likh rahi hoon...',
-    running: 'Command chala rahi hoon...',
-    starting: 'App shuru kar rahi hoon...',
-    generating: 'Code bana rahi hoon...',
-    responding: 'Jawaab de rahi hoon...',
-    working: 'Kaam kar rahi hoon...',
-  },
-};
-
-function statusLabel(key: StreamStatusKey, language: 'hi' | 'en', fileName?: string): string {
-  const label = STATUS_LABEL[language][key];
-  return fileName ? label.replace('{file}', fileName) : label;
-}
-
-function lastWritingFileName(content: string): string | undefined {
-  const m = content.match(/<boltAction[^>]*filePath="([^"]+)"[^>]*>(?![\s\S]*<\/boltAction>)/);
-  return m ? m[1].split('/').pop() : undefined;
-}
-
 export const AssistantMessage = memo(
   ({
     content,
@@ -162,34 +107,6 @@ export const AssistantMessage = memo(
 
     const hasContent = displayContent && displayContent.trim().length > 0;
     const hasReasoning = reasoningParts && reasoningParts.length > 0;
-
-    // Track elapsed time during streaming
-    const [elapsed, setElapsed] = useState(0);
-    const startRef = useRef(Date.now());
-
-    useEffect(() => {
-      if (isStreaming) {
-        startRef.current = Date.now();
-        const interval = setInterval(() => {
-          setElapsed(Math.round((Date.now() - startRef.current) / 1000));
-        }, 1000);
-        return () => clearInterval(interval);
-      } else {
-        setElapsed(0);
-      }
-    }, [isStreaming]);
-
-    // Derive stable status key, then localize it to the user's chat language.
-    // The 'writing' key also carries the live file name (e.g. "package.json").
-    const streamStatusKey: StreamStatusKey | null = isStreaming ? deriveStreamStatusKey(displayContent) : null;
-    const streamStatus = streamStatusKey
-      ? statusLabel(streamStatusKey, language, streamStatusKey === 'writing' ? lastWritingFileName(displayContent) : undefined)
-      : '';
-
-    // Detect if the model is currently in a reasoning/thinking phase
-    // (last part in the stream is a reasoning part) — ThoughtBox handles this UI
-    const isActivelyReasoning = isStreaming && parts && parts.length > 0 &&
-      parts[parts.length - 1].type === 'reasoning';
 
     // ─── Phase B: subscribe to buildErrorCard store (last assistant msg only).
     //     The atom is set by BuilderPage's auto-fix loop at the same moment it
@@ -238,36 +155,10 @@ export const AssistantMessage = memo(
               </div>
             )}
 
-            {/* ─── Streaming activity indicator ─── */}
-            {/* Only shows when NOT actively reasoning (ThoughtBox handles reasoning state) */}
-            {/* Shows status like "Writing file...", "Running command...", "Generating code..." */}
-            {isStreaming && !isActivelyReasoning && streamStatusKey !== null && streamStatusKey !== 'thinking' && (
-              <div className="flex items-center gap-2 mb-2">
-                <div
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ring-1 ring-[#E8601A]/12"
-                  style={{
-                    background: 'rgba(232, 96, 26, 0.06)',
-                    color: '#E8601A',
-                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
-                  }}
-                >
-                  {/* Animated pulse dot */}
-                  <span
-                    className="w-[5px] h-[5px] rounded-full bg-[#E8601A]"
-                    style={{
-                      animation: 'pulse 1.2s ease-in-out infinite',
-                    }}
-                  />
-                  <span>{streamStatus}</span>
-                  {elapsed > 0 && (
-                    <span className="text-[#6B6560] ml-0.5">{elapsed}s</span>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* ─── Interleaved rendering: thinking → response → thinking → response ─── */}
             {/* Renders parts in chronological order for a progressive experience */}
+            {/* Phase R2: inline streaming status pill + cursor blink deleted — */}
+            {/* the DynamicStatusPill at the end of the column owns all stream state. */}
             {parts && parts.length > 0 ? (
               (() => {
                 // Group consecutive same-type parts for cleaner rendering
@@ -324,17 +215,6 @@ export const AssistantMessage = memo(
                         >
                           {textContent}
                         </Markdown>
-                        {/* Streaming cursor on last text block */}
-                        {isStreaming && isLastTextGroup && (
-                          <span
-                            className="inline-block w-[3px] h-[14px] ml-0.5 rounded-sm"
-                            style={{
-                              background: '#E8601A',
-                              animation: 'blink 1s steps(2) infinite',
-                              verticalAlign: 'text-bottom',
-                            }}
-                          />
-                        )}
                       </Fragment>
                     );
                   }
@@ -383,18 +263,6 @@ export const AssistantMessage = memo(
                     addToolResult={addToolResult}
                   />
                 )}
-
-                {/* Streaming cursor */}
-                {isStreaming && hasContent && (
-                  <span
-                    className="inline-block w-[3px] h-[14px] ml-0.5 rounded-sm"
-                    style={{
-                      background: '#E8601A',
-                      animation: 'maya-blink 0.8s cubic-bezier(0.32, 0.72, 0, 1) infinite',
-                      verticalAlign: 'text-bottom',
-                    }}
-                  />
-                )}
               </>
             )}
 
@@ -421,24 +289,6 @@ export const AssistantMessage = memo(
             )}
           </div>
         </div>
-
-        {/* Animations */}
-        <style jsx>{`
-          @keyframes blink {
-            0% { opacity: 1; }
-            50% { opacity: 0; }
-            100% { opacity: 1; }
-          }
-          @keyframes maya-blink {
-            0% { opacity: 1; }
-            50% { opacity: 0.2; }
-            100% { opacity: 1; }
-          }
-          @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.8); }
-          }
-        `}</style>
       </div>
     );
   },

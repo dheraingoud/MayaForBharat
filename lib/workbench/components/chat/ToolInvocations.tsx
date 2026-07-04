@@ -254,11 +254,11 @@ const ToolResultsList = memo(({ toolInvocations, toolCallAnnotations, theme }: T
                   <span className="text-bolt-elements-textPrimary font-semibold">{annotation?.toolDescription}</span>
                 </div>
                 <div className="text-bolt-elements-textSecondary text-xs mb-1">Parameters:</div>
-                <div className="bg-[#FAFAFA] dark:bg-[#0A0A0A] p-3 rounded-md">
+                <div className="bg-[#FAFAFA] dark:bg-[#0A0A09] p-3 rounded-md">
                   <JsonCodeBlock className="mb-0" code={JSON.stringify(tool.toolInvocation.args)} theme={theme} />
                 </div>
                 <div className="text-bolt-elements-textSecondary text-xs mt-3 mb-1">Result:</div>
-                <div className="bg-[#FAFAFA] dark:bg-[#0A0A0A] p-3 rounded-md">
+                <div className="bg-[#FAFAFA] dark:bg-[#0A0A09] p-3 rounded-md">
                   <JsonCodeBlock className="mb-0" code={JSON.stringify(tool.toolInvocation.result)} theme={theme} />
                 </div>
               </div>
@@ -338,7 +338,7 @@ const ToolCallsList = memo(({ toolInvocations, toolCallAnnotations, addToolResul
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-      <ul className="list-none space-y-4">
+      <ul className="list-none grid grid-flow-dense grid-cols-1 sm:grid-cols-2 gap-2">
         {toolInvocations.map((tool, index) => {
           const toolCallState = tool?.toolInvocation?.state;
 

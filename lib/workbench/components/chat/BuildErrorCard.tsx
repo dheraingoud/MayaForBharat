@@ -62,7 +62,7 @@ export const BuildErrorCard = memo(({ command, error, source, attempt, maxAttemp
     >
       <div className="rounded-[calc(1rem-2px)] p-3">
         <div className="flex items-center gap-2">
-          <span className="i-ph:warning-octagon w-4 h-4 shrink-0 text-red-400/80" />
+          <span className="i-ph:warning-circle w-4 h-4 shrink-0 text-red-400/80" />
           <span className="text-[12px] font-medium text-red-200/90">{title}</span>
           {command && command !== '(build)' ? (
             <code className="ml-2 text-[11px] text-red-200/50 font-mono truncate min-w-0">{command}</code>

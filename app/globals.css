@@ -11,6 +11,11 @@
   --font-display: var(--font-outfit);
   --font-sans: var(--font-dm-sans);
   --font-mono: var(--font-jetbrains-mono);
+  /* Phase R2 typography contract: two families, three roles. Headline +
+     body both resolve to Outfit (Sora fallback); code is JetBrains Mono.
+     Drop DM Sans + Fira Code from the chat tree — one source of truth. */
+  --font-body: var(--font-outfit, var(--font-sora));
+  --font-code: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
 
   /* ─── MAYA Color Palette ──────────────────────────────── */
   --bg-primary: #F5F4F0;
@@ -384,5 +389,34 @@
   input, select, textarea {
     font-size: 16px !important;
   }
+}
+
+/* ─── Phase R2: Accent-tinted Double-Bezel Utilities ────────────
+   One source of truth for the chat + lander bezel vocabulary. The
+   existing .bezel-outer/.bezel-inner use neutral borders; these use the
+   Maya-orange accent tint at /10 (rest) and /18 (active) plus the inset
+   hairline highlight. No neon box-shadow — inner borders + tint only. */
+.bezel-ring {
+  box-shadow: inset 0 0 0 1px rgba(232, 96, 26, 0.10),
+              inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.bezel-ring-active {
+  box-shadow: inset 0 0 0 1px rgba(232, 96, 26, 0.18),
+              inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.bezel-inset {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.bezel-inset-active {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Maya pulse dot (status pill / build-error card fixing state) */
+@keyframes maya-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.78); }
+}
+.maya-pulse-dot {
+  animation: maya-pulse-dot 1.4s var(--ease-premium) infinite;
 }
 
