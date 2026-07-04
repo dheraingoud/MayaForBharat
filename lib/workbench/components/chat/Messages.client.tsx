@@ -113,6 +113,20 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
               const isUserMessage = role === 'user';
               const isFirst = index === 0;
 
+              // ── M4: bubble grouping (astryx/vercel pattern). Compute position
+              //    from same-role neighbors so sender-side corners collapse into
+              //    a single cluster (not N identical bubbles). Also tighten the
+              //    top margin between same-sender msgs for a contiguous stack.
+              const prevMsg = messages[index - 1];
+              const nextMsg = messages[index + 1];
+              const prevSame = !!prevMsg && prevMsg.role === role;
+              const nextSame = !!nextMsg && nextMsg.role === role;
+              const position: 'single' | 'first' | 'middle' | 'last' =
+                prevSame && nextSame ? 'middle'
+                : prevSame && !nextSame ? 'last'
+                : !prevSame && nextSame ? 'first'
+                : 'single';
+
               // AI SDK v6: UIMessage no longer carries `content` or `annotations`.
               // Text lives in `parts` (each part has optional `.text`); the children
               // normalize from parts when content is empty, so derive a string here.
@@ -147,7 +161,8 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                 <motion.div
                   key={index}
                   className={classNames('flex w-full group/message', {
-                    'mt-6': !isFirst,
+                    'mt-6': !isFirst && !prevSame,
+                    'mt-1.5': !isFirst && prevSame,
                     'justify-end': isUserMessage,
                     'justify-start': !isUserMessage,
                   })}
@@ -170,6 +185,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                         content={content}
                         parts={childParts}
                         messageId={messageId}
+                        position={position}
                         isEditing={editingId === messageId}
                         onStartEdit={() => startEdit(messageId)}
                         onSaveEdit={(text) => saveUserEdit(messageId, text)}

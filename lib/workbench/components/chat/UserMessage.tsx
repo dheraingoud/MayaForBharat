@@ -28,6 +28,8 @@ interface UserMessageProps {
   onSaveEdit?: (text: string) => void;
   onCancelEdit?: () => void;
   language?: 'hi' | 'en';
+  /** M4: bubble-group position — sender-side corners collapse into a cluster. */
+  position?: 'single' | 'first' | 'middle' | 'last';
 }
 
 export function UserMessage({
@@ -39,7 +41,15 @@ export function UserMessage({
   onSaveEdit,
   onCancelEdit,
   language = 'en',
+  position = 'single',
 }: UserMessageProps) {
+  // M4: collapse sender-side (right) corners between same-sender bubbles.
+  // Tail corner is BR; TR tucks toward the prev bubble, BR tucks toward next.
+  const cornerVariant =
+    position === 'first' ? 'rounded-br-sm'
+    : position === 'middle' ? 'rounded-tr-sm rounded-br-sm'
+    : position === 'last' ? 'rounded-tr-sm rounded-br-md'
+    : 'rounded-br-md';
   // AI SDK v4: content may be empty, actual text lives in parts[].text
   // Normalize: extract text from parts if content is empty
   const resolvedContent = resolveContent(content, parts);
@@ -73,11 +83,11 @@ export function UserMessage({
       <div className="overflow-hidden flex flex-col gap-1.5 items-end">
         {/* User message bubble — double-bezel (outer ring shell + inner core) */}
         <div
-          className="p-[1px] w-fit max-w-[85%] rounded-2xl rounded-br-md ring-1 ring-[#E8601A]/10"
+          className={`p-[1px] w-fit max-w-[85%] rounded-2xl ${cornerVariant} ring-1 ring-[#E8601A]/10`}
           style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)' }}
         >
           <div
-            className="px-4 py-2.5 rounded-[calc(1rem-1px)] rounded-br-md text-[14px] leading-relaxed"
+            className={`px-4 py-2.5 rounded-[calc(1rem-1px)] ${cornerVariant} text-[14px] leading-relaxed`}
             style={{
               background: 'rgba(232, 96, 26, 0.04)',
               color: '#F5F4F0',
@@ -127,11 +137,11 @@ export function UserMessage({
   return (
     <div className="flex flex-col gap-1.5 items-end w-full">
       <div
-        className="p-[1px] w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] ring-1 ring-[#E8601A]/10"
+        className={`p-[1px] w-fit rounded-2xl ${cornerVariant} ml-auto max-w-[85%] ring-1 ring-[#E8601A]/10`}
         style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)' }}
       >
         <div
-          className="px-4 py-2.5 rounded-[calc(1rem-1px)] rounded-br-md text-[14px] leading-relaxed"
+          className={`px-4 py-2.5 rounded-[calc(1rem-1px)] ${cornerVariant} text-[14px] leading-relaxed`}
           style={{
             background: 'rgba(232, 96, 26, 0.04)',
             color: '#F5F4F0',

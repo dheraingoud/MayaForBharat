@@ -55,7 +55,7 @@ export const CodeBlock = memo(
       <div className={classNames('relative group text-left rounded-lg overflow-hidden border border-white/[0.06]', className)}>
         {/* Language label + copy button header */}
         {language && language !== 'plaintext' && (
-          <div className="flex items-center justify-between px-3 py-1.5 bg-[#1a1a1a] border-b border-white/[0.06]">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[#1A1917] border-b border-white/[0.06]">
             <span className="text-[10px] font-medium text-[#6B6560] uppercase tracking-wider">{language}</span>
             {!disableCopy && (
               <button
@@ -79,7 +79,7 @@ export const CodeBlock = memo(
           >
             <button
               className={classNames(
-                'flex items-center bg-accent-500 p-[6px] justify-center before:bg-white before:rounded-l-md before:text-gray-500 before:border-r before:border-gray-300 rounded-md transition-theme',
+                'flex items-center bg-[#E8601A] p-[6px] justify-center before:bg-white before:rounded-l-md before:text-gray-500 before:border-r before:border-gray-300 rounded-md transition-theme',
                 { 'before:opacity-0': !copied, 'before:opacity-100': copied },
               )}
               title="Copy Code"
