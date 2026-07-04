@@ -128,8 +128,16 @@ export interface StickToBottomContentProps extends Omit<React.HTMLAttributes<HTM
 function Content({ children, ...props }: StickToBottomContentProps) {
   const context = useStickToBottomContext();
 
+  // MATCH UPSTREAM use-stick-to-bottom: scrollRef is the scroller.
+  // Upstream uses inline style { height: '100%', width: '100%', scrollbarGutter: 'stable both-edges' }.
+  // The prior vendored fork used className="w-full h-auto" — h-auto means height grows to content,
+  // so scrollRef NEVER overflowed and the spring/FAB/auto-follow were all dead code
+  // (isAtBottom stuck true, scrollToBottom was a no-op). Restoring height:100% makes the lib work.
   return (
-    <div ref={context.scrollRef} className="w-full h-auto">
+    <div
+      ref={context.scrollRef}
+      style={{ height: '100%', width: '100%', scrollbarGutter: 'stable both-edges' }}
+    >
       <div {...props} ref={context.contentRef}>
         {typeof children === 'function' ? children(context) : children}
       </div>

@@ -352,9 +352,12 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         <div className="flex flex-col lg:flex-row overflow-y-auto w-full h-full">
           <div className={classNames(styles.Chat, 'flex flex-col flex-grow lg:min-w-[var(--chat-min-width)] h-full')}>
             <StickToBottom
-              className="pt-6 px-2 sm:px-6 relative h-full flex flex-col modern-scrollbar"
-              resize="instant"
-              initial="instant"
+              className="pt-6 px-2 sm:px-6 relative h-full flex flex-col"
+              resize="smooth"
+              initial="smooth"
+              mass={1.25}
+              damping={0.7}
+              stiffness={0.05}
               // Keep autoscroll "sticky": if the user scrolls back up to read
               // something we keep them there (that's what stickToBottom's
               // default behavior is). If they scrolled back to the bottom we

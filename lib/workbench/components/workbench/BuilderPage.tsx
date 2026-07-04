@@ -1939,13 +1939,20 @@ const ChatPanel = memo((
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-[#1A1917]">
-      {/* ── Messages area ── */}
+      {/* ── Messages area (relative wrapper so the alert/progress overlay can
+          float above the scroll surface as an absolute sibling, NOT as a
+          sticky child inside <StickToBottom.Content> — sticky-inside-content
+          races the spring on every layout tick and yanks the viewport). ── */}
+      <div className="relative flex-1 min-h-0">
       <StickToBottom
-        className="flex-1 min-h-0 overflow-y-auto px-3 pt-4 relative"
+        className="h-full px-3 pt-4"
         resize="smooth"
         initial="smooth"
+        mass={1.25}
+        damping={0.7}
+        stiffness={0.05}
       >
-        <StickToBottom.Content className="flex flex-col gap-2 relative pb-4">
+        <StickToBottom.Content className="flex flex-col gap-2 relative pb-4 modern-scrollbar">
           {messages.length === 0 && !isStreaming && (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="w-11 h-11 rounded-xl bg-[#E8601A]/[0.07] flex items-center justify-center mb-3.5">
@@ -1974,18 +1981,30 @@ const ChatPanel = memo((
           </ClientOnly>
           <BuilderScrollToBottom />
         </StickToBottom.Content>
+      </StickToBottom>
 
-        <div className="sticky bottom-2 flex flex-col gap-2 w-full mx-auto z-10 mb-2">
-          {actionAlert && (
+      {/* Alert/progress overlay — absolute sibling OUTSIDE <StickToBottom>.
+          Was a sticky child inside Content, which raced the spring on every
+          layout tick and yanked the viewport. Now floats above the scroll
+          surface without touching scroll physics. px-3 matches the scroller's
+          horizontal padding so alerts align with message copy. */}
+      <div className="pointer-events-none absolute bottom-2 left-0 right-0 z-10 flex flex-col gap-2 items-center px-3">
+        {actionAlert && (
+          <div className="pointer-events-auto w-full max-w-3xl">
             <ChatAlert
               alert={actionAlert}
               clearAlert={clearAlert}
               postMessage={(message: string | undefined) => { sendMessage(message); clearAlert() }}
             />
-          )}
-          {progressAnnotations.length > 0 && <ProgressCompilation data={progressAnnotations} />}
-        </div>
-      </StickToBottom>
+          </div>
+        )}
+        {progressAnnotations.length > 0 && (
+          <div className="pointer-events-auto w-full max-w-3xl">
+            <ProgressCompilation data={progressAnnotations} />
+          </div>
+        )}
+      </div>
+      </div>
 
       {/* ── Hidden file input ── */}
       <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.txt,.md,.json,.csv,.tsx,.ts,.js,.jsx,.html,.css" onChange={handleFileSelect} />
