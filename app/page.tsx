@@ -509,16 +509,10 @@ export default function LandingPage() {
 
               {/* ── Mic Button (under hero) ──────────────────────────────── */}
               <div className="relative flex items-center justify-center">
-                {!isMicActive && (
-                  <span className="mic-glow-ring" />
-                )}
-
-                {isMicActive && (
-                  <>
-                    <span className="mic-ring mic-ring-1" />
-                    <span className="mic-ring mic-ring-2" />
-                  </>
-                )}
+                {/* M5: static radial wash replaces the neon glow-ring orb + the
+                    pulsing mic-rings (no neon box-shadow). The double-bezel
+                    disc on .mic-btn carries the rest of the listening cue. */}
+                <span className="mic-radial-wash" />
 
                 <button
                   onClick={handleMicToggle}
@@ -654,7 +648,6 @@ export default function LandingPage() {
                         className={`thought-pill ${isThinking ? 'thought-pill-active' : 'thought-pill-done'}`}
                         onClick={() => setThinkingExpanded(!thinkingExpanded)}
                       >
-                        <span className="thought-sparkle">✦</span>
                         <span className="thought-label">
                           {isThinking ? 'Thinking..' : `Thought for ${thinkDuration || 1}s`}
                         </span>
@@ -796,12 +789,14 @@ export default function LandingPage() {
           line-height: 1;
           user-select: none;
           transition: opacity 0.4s cubic-bezier(0.16,1,0.3,1), transform 0.4s cubic-bezier(0.16,1,0.3,1);
-          text-shadow: 0 0 60px rgba(232,96,26,0.25);
         }
         .hero-name.visible { opacity: 1; transform: translateY(0) scale(1); }
         .hero-name.fading  { opacity: 0; transform: translateY(-8px) scale(0.97); }
 
         /* ── Mic button (hero) ────────────────────────────────────── */
+        /* M5: double-bezel disc — outer ring (border) + inner core highlight
+           (inset). Neon box-shadow + breathe glow removed per "no neon"
+           contract. A static radial wash (.mic-radial-wash) sits behind. */
         .mic-btn {
           position: relative;
           z-index: 2;
@@ -816,13 +811,12 @@ export default function LandingPage() {
           justify-content: center;
           cursor: pointer;
           transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
-          box-shadow: 0 0 20px rgba(232,96,26,0.1);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
         }
         .mic-btn:hover {
           background: rgba(232,96,26,0.15);
           border-color: rgba(232,96,26,0.6);
           transform: scale(1.08);
-          box-shadow: 0 0 30px rgba(232,96,26,0.2);
         }
         .mic-btn:active { transform: scale(0.95); }
 
@@ -830,49 +824,19 @@ export default function LandingPage() {
           background: #E8601A !important;
           color: white !important;
           border-color: #E8601A !important;
-          box-shadow: 0 0 40px rgba(232,96,26,0.4);
-          animation: mic-breathe 1.5s ease-in-out infinite;
         }
 
-        @keyframes mic-breathe {
-          0%, 100% { box-shadow: 0 0 20px rgba(232,96,26,0.3); }
-          50%       { box-shadow: 0 0 50px rgba(232,96,26,0.6); }
-        }
-
-        .mic-glow-ring {
+        /* M5: static radial wash — soft orange bloom behind the disc, not a
+           glowing box-shadow orb. pointer-events:none keeps the composer
+           focusable. */
+        .mic-radial-wash {
           position: absolute;
-          width: 74px;
-          height: 74px;
+          z-index: 1;
+          width: 110px;
+          height: 110px;
           border-radius: 50%;
-          border: 2px solid transparent;
-          background: conic-gradient(from 0deg, transparent 0%, rgba(232,96,26,0.5) 30%, transparent 60%) border-box;
-          -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
-          -webkit-mask-composite: xor;
-          mask-composite: exclude;
-          animation: glow-spin 3s linear infinite;
+          background: radial-gradient(circle, rgba(232,96,26,0.10) 0%, rgba(232,96,26,0) 70%);
           pointer-events: none;
-          filter: blur(0.5px);
-        }
-
-        @keyframes glow-spin {
-          0%   { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-
-        .mic-ring {
-          position: absolute;
-          width: 62px;
-          height: 62px;
-          border-radius: 50%;
-          border: 1.5px solid rgba(232,96,26,0.3);
-          animation: pulse-expand 2s ease-out infinite;
-          pointer-events: none;
-        }
-        .mic-ring-2 { animation-delay: 0.6s; }
-
-        @keyframes pulse-expand {
-          0%   { transform: scale(1);   opacity: 0.6; }
-          100% { transform: scale(2.8); opacity: 0; }
         }
 
         .wave-bar {
@@ -889,6 +853,10 @@ export default function LandingPage() {
         }
 
         /* ── Input row (shared between idle and bottom bar) ───────── */
+        /* M5: double-bezel — outer ring (border) + inner core (inset
+           highlight). The old single-hairline border is kept as the outer
+           ring; inset 0 1px 0 adds the inner-bezel plane. Focus ring stays
+           accent-tint (not neon). */
         .input-row {
           display: flex;
           align-items: flex-end;
@@ -898,18 +866,20 @@ export default function LandingPage() {
           border-radius: 16px;
           padding: 6px 6px 6px 18px;
           transition: border-color 0.3s ease, box-shadow 0.3s ease;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
         }
         :global(.dark) .input-row {
           background: rgba(42,41,37,0.8);
           border-color: rgba(255,255,255,0.1);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
         }
         .input-row:focus-within {
           border-color: rgba(232,96,26,0.5);
-          box-shadow: 0 0 0 3px rgba(232,96,26,0.08);
+          box-shadow: 0 0 0 3px rgba(232,96,26,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
         }
         :global(.dark) .input-row:focus-within {
           border-color: rgba(232,96,26,0.5);
-          box-shadow: 0 0 0 3px rgba(232,96,26,0.1);
+          box-shadow: 0 0 0 3px rgba(232,96,26,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
         }
 
         .prompt-textarea {
@@ -1107,7 +1077,8 @@ export default function LandingPage() {
           justify-content: flex-start;
         }
 
-        /* User bubble */
+        /* M5: double-bezel user bubble — outer orange ring (border) + inner
+           core highlight (inset), matching chat UserMessage's bezel plane. */
         .chat-bubble-user {
           background: rgba(232,96,26,0.08);
           border: 1px solid rgba(232,96,26,0.12);
@@ -1117,9 +1088,11 @@ export default function LandingPage() {
           font-size: 14px;
           line-height: 1.55;
           color: #1A1917;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
         }
         :global(.dark) .chat-bubble-user {
           color: #F5F4F0;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
         }
 
         /* Assistant bubble */
@@ -1154,31 +1127,13 @@ export default function LandingPage() {
         }
 
         /* Active: shimmer glare sweeping left→right */
+        /* M5: shimmer glare removed (no neon sweep). The active pill now reads
+           via orange tint + border alone — matches chat ThoughtBox's flat
+           plateau + maya-pulse-dot. */
         .thought-pill-active {
           color: #E8601A;
           border-color: rgba(232,96,26,0.15);
           background: rgba(232,96,26,0.04);
-        }
-        .thought-pill-active::after {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: -100%;
-          width: 100%;
-          height: 100%;
-          background: linear-gradient(
-            90deg,
-            transparent 0%,
-            rgba(232,96,26,0.15) 40%,
-            rgba(232,96,26,0.25) 50%,
-            rgba(232,96,26,0.15) 60%,
-            transparent 100%
-          );
-          animation: thought-glare 1.8s ease-in-out infinite;
-        }
-        @keyframes thought-glare {
-          0% { left: -100%; }
-          100% { left: 100%; }
         }
         .thought-pill-active:hover {
           background: rgba(232,96,26,0.08);
@@ -1196,11 +1151,6 @@ export default function LandingPage() {
           border-color: rgba(232,96,26,0.15);
         }
 
-        .thought-sparkle {
-          font-size: 10px;
-          position: relative;
-          z-index: 1;
-        }
         .thought-label {
           position: relative;
           z-index: 1;
