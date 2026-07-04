@@ -39,26 +39,29 @@ export function UserMessage({ content, parts }: UserMessageProps) {
 
     return (
       <div className="overflow-hidden flex flex-col gap-2 items-end">
-        {/* User message bubble */}
+        {/* User message bubble — double-bezel (outer ring shell + inner core) */}
         <div
-          className="px-4 py-2.5 w-fit max-w-[85%] rounded-2xl rounded-br-md text-[14px] leading-relaxed"
-          style={{
-            background: 'rgba(232, 96, 26, 0.04)',
-            border: '1px solid rgba(232, 96, 26, 0.10)',
-            color: '#F5F4F0',
-            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
-          }}
+          className="p-[1px] w-fit max-w-[85%] rounded-2xl rounded-br-md ring-1 ring-[#E8601A]/10"
+          style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)' }}
         >
-          {textContent && <span>{textContent}</span>}
-          {images.map((item, index) => (
-            <img
-              key={index}
-              src={item.url}
-              alt={`Image ${index + 1}`}
-              className="max-w-full h-auto rounded-lg mt-2"
-              style={{ maxHeight: '512px', objectFit: 'contain' }}
-            />
-          ))}
+          <div
+            className="px-4 py-2.5 rounded-[calc(1rem-1px)] rounded-br-md text-[14px] leading-relaxed"
+            style={{
+              background: 'rgba(232, 96, 26, 0.04)',
+              color: '#F5F4F0',
+            }}
+          >
+            {textContent && <span>{textContent}</span>}
+            {images.map((item, index) => (
+              <img
+                key={index}
+                src={item.url}
+                alt={`Image ${index + 1}`}
+                className="max-w-full h-auto rounded-lg mt-2"
+                style={{ maxHeight: '512px', objectFit: 'contain' }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -68,32 +71,35 @@ export function UserMessage({ content, parts }: UserMessageProps) {
 
   return (
     <div
-      className="px-4 py-2.5 w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] text-[14px] leading-relaxed"
-      style={{
-        background: 'rgba(232, 96, 26, 0.04)',
-        border: '1px solid rgba(232, 96, 26, 0.10)',
-        color: '#F5F4F0',
-        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
-      }}
+      className="p-[1px] w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] ring-1 ring-[#E8601A]/10"
+      style={{ boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)' }}
     >
-      {images.length > 0 && (
-        <div className="flex gap-3.5 mb-2">
-          {images.map((item, index) => (
-            <div className="relative flex rounded-lg border border-white/[0.08] overflow-hidden">
-              <div className="h-16 w-16 bg-transparent outline-none">
-                <img
-                  key={index}
-                  src={item.url}
-                  alt={`Image ${index + 1}`}
-                  className="h-full w-full rounded-lg"
-                  style={{ objectFit: 'fill' }}
-                />
+      <div
+        className="px-4 py-2.5 rounded-[calc(1rem-1px)] rounded-br-md text-[14px] leading-relaxed"
+        style={{
+          background: 'rgba(232, 96, 26, 0.04)',
+          color: '#F5F4F0',
+        }}
+      >
+        {images.length > 0 && (
+          <div className="flex gap-3.5 mb-2">
+            {images.map((item, index) => (
+              <div className="relative flex rounded-lg border border-white/[0.08] overflow-hidden">
+                <div className="h-16 w-16 bg-transparent outline-none">
+                  <img
+                    key={index}
+                    src={item.url}
+                    alt={`Image ${index + 1}`}
+                    className="h-full w-full rounded-lg"
+                    style={{ objectFit: 'fill' }}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <span>{textContent}</span>
+            ))}
+          </div>
+        )}
+        <span>{textContent}</span>
+      </div>
     </div>
   );
 }

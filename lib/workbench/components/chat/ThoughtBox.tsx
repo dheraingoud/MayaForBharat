@@ -36,7 +36,7 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
     <div className="thought-box-root">
       {/* The pill — transitions IN PLACE from "Thinking..." → "Thought for Xs" */}
       <button
-        onClick={() => !isStreaming && setIsExpanded(!isExpanded)}
+        onClick={() => setIsExpanded(!isExpanded)}
         className={`thought-pill ${isStreaming ? 'thought-pill-active' : 'thought-pill-done'}`}
         type="button"
         aria-expanded={isExpanded}
@@ -63,7 +63,8 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
           {thinkDuration}s
         </span>
 
-        {/* Chevron — fades in when done (expand/collapse) */}
+        {/* Chevron — always visible so the buffered reasoning is expandable
+            mid-stream too (content is buffered, safe to reveal live). */}
         <svg
           width="10"
           height="10"
@@ -71,14 +72,14 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
           fill="none"
           stroke="currentColor"
           strokeWidth="2.5"
-          className={`thought-chevron ${isStreaming ? 'chevron-hidden' : 'chevron-visible'} ${isExpanded ? 'chevron-up' : ''}`}
+          className={`thought-chevron chevron-visible ${isExpanded ? 'chevron-up' : ''}`}
         >
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
 
-      {/* Expandable content — only when done & expanded */}
-      <div className={`thought-content ${isExpanded && !isStreaming ? 'content-open' : 'content-closed'}`}>
+      {/* Expandable content — expandable during stream AND when done */}
+      <div className={`thought-content ${isExpanded ? 'content-open' : 'content-closed'}`}>
         <div className="thought-content-inner">
           {children}
         </div>
@@ -258,7 +259,7 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
           transition: max-height 0.35s cubic-bezier(0.16,1,0.3,1), opacity 0.25s ease, margin 0.3s ease;
         }
         .content-open {
-          max-height: 300px;
+          max-height: 380px;
           opacity: 1;
           margin: 6px 0 6px 8px;
         }
@@ -269,15 +270,16 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
         }
         .thought-content-inner {
           color: #6B6560;
-          font-size: 12px;
-          line-height: 1.6;
-          padding: 8px 12px;
+          font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 11.5px;
+          line-height: 1.65;
+          padding: 10px 14px;
           border-left: 2px solid rgba(232,96,26,0.18);
           background: rgba(232,96,26,0.02);
           border-radius: 0 6px 6px 0;
           white-space: pre-wrap;
           word-break: break-word;
-          max-height: 280px;
+          max-height: 360px;
           overflow-y: auto;
         }
       `}</style>

@@ -103,7 +103,10 @@ export const ToolInvocations = memo(({ toolInvocations, toolCallAnnotations, add
   }
 
   return (
-    <div className="tool-invocation border border-bolt-elements-borderColor flex flex-col overflow-hidden rounded-lg w-full transition-border duration-150">
+    <div
+      className="tool-invocation flex flex-col overflow-hidden rounded-xl w-full ring-1 ring-white/[0.06]"
+      style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)' }}
+    >
       <div className="flex">
         <button
           className="flex items-stretch bg-bolt-elements-background-depth-2 hover:bg-bolt-elements-artifacts-backgroundHover w-full overflow-hidden"
@@ -354,7 +357,10 @@ const ToolCallsList = memo(({ toolInvocations, toolCallAnnotations, addToolResul
               animate="visible"
               transition={{ duration: 0.2, ease: cubicEasingFn }}
             >
-              <div className="bg-bolt-elements-background-depth-3 rounded-lg p-2">
+              <div
+                className="bg-bolt-elements-background-depth-3 rounded-xl p-2 ring-1 ring-white/[0.05]"
+                style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}
+              >
                 <div key={toolCallId} className="flex gap-1">
                   <div className="flex flex-col items-center ">
                     <span className="mr-auto font-light font-normal text-md text-bolt-elements-textPrimary rounded-md">

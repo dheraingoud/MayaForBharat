@@ -69,6 +69,8 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
 
     return (
       <div id={id} className={props.className} ref={ref}>
+        {/* Phase R: centered reading column. Breathing room, fade-up enter. */}
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
         {messages.length > 0
           ? messages.map((UIMessage, index) => {
               const { role, id: messageId, parts } = UIMessage;
@@ -109,17 +111,17 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                 <motion.div
                   key={index}
                   className={classNames('flex w-full', {
-                    'mt-4': !isFirst,
+                    'mt-6': !isFirst,
                     'justify-end': isUserMessage,
                     'justify-start': !isUserMessage,
                   })}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
+                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                   transition={{
                     type: 'spring',
                     stiffness: 120,
-                    damping: 20,
-                    duration: 0.5,
+                    damping: 22,
+                    duration: 0.6,
                     delay: Math.min(index * 0.04, 0.4),
                   }}
                 >
@@ -153,37 +155,36 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
         {/* Streaming indicator: only show when streaming AND the last message hasn't started rendering yet */}
         {isStreaming && (messages.length === 0 || messages[messages.length - 1]?.role === 'user') && (
           <motion.div
-            className="flex items-center gap-3 w-full mt-4 px-1"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: 'spring', stiffness: 120, damping: 18, duration: 0.5 }}
+            className="flex items-center gap-3 w-full mt-6"
+            initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ type: 'spring', stiffness: 120, damping: 22, duration: 0.6 }}
           >
-            {/* MAYA logo shimmer */}
+            {/* MAYA avatar — double-bezel (hairline ring + inset highlight, no neon glow) */}
             <div
-              className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
+              className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center ring-1 ring-[#E8601A]/20"
               style={{
                 background: 'linear-gradient(135deg, #E8601A 0%, #C94E12 100%)',
-                boxShadow: '0 0 12px rgba(232, 96, 26, 0.3)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
               }}
             >
-              <span className="text-white text-[9px] font-bold">M</span>
+              <span className="text-white text-[9px] font-bold tracking-tight">M</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce"
-                style={{ animationDelay: '0ms', animationDuration: '0.8s' }}
-              />
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce"
-                style={{ animationDelay: '150ms', animationDuration: '0.8s' }}
-              />
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce"
-                style={{ animationDelay: '300ms', animationDuration: '0.8s' }}
-              />
+            {/* Bilingual reading pill — double-bezel glass, no emoji */}
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#E8601A]/[0.04] ring-1 ring-[#E8601A]/12 text-[12px] text-[#6B6560] font-medium"
+              style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce" style={{ animationDelay: '0ms', animationDuration: '0.8s' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce" style={{ animationDelay: '150ms', animationDuration: '0.8s' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-bounce" style={{ animationDelay: '300ms', animationDuration: '0.8s' }} />
+              </span>
+              <span>{'MAYA is reading your prompt…'}</span>
             </div>
           </motion.div>
         )}
+        </div>
       </div>
     );
   },

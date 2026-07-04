@@ -189,12 +189,12 @@ export const AssistantMessage = memo(
       <div className="overflow-hidden w-full">
         {/* ─── v0-style: MAYA avatar + content row ─── */}
         <div className="flex gap-3 items-start">
-          {/* MAYA avatar — always visible; spring-breathes while streaming */}
+          {/* MAYA avatar — double-bezel (hairline ring + inset highlight, no neon glow) */}
           <motion.div
-            className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5"
+            className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5 ring-1 ring-[#E8601A]/20"
             style={{
               background: 'linear-gradient(135deg, #E8601A 0%, #C94E12 100%)',
-              boxShadow: isStreaming ? '0 0 10px rgba(232, 96, 26, 0.3)' : 'none',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
             }}
             animate={{ scale: isStreaming ? 1.04 : 1 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15 }}
@@ -224,10 +224,9 @@ export const AssistantMessage = memo(
             {isStreaming && !isActivelyReasoning && streamStatusKey !== null && streamStatusKey !== 'thinking' && (
               <div className="flex items-center gap-2 mb-2">
                 <div
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ring-1 ring-[#E8601A]/12"
                   style={{
                     background: 'rgba(232, 96, 26, 0.06)',
-                    border: '1px solid rgba(232, 96, 26, 0.12)',
                     color: '#E8601A',
                     boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
                   }}
@@ -237,7 +236,6 @@ export const AssistantMessage = memo(
                     className="w-[5px] h-[5px] rounded-full bg-[#E8601A]"
                     style={{
                       animation: 'pulse 1.2s ease-in-out infinite',
-                      boxShadow: '0 0 4px rgba(232, 96, 26, 0.5)',
                     }}
                   />
                   <span>{streamStatus}</span>
@@ -380,14 +378,14 @@ export const AssistantMessage = memo(
               </>
             )}
 
-            {/* Empty response warning — shows when streaming ended but no content was produced */}
+            {/* Empty response warning — double-bezel alert, bilingual */}
             {!isStreaming && !hasContent && !hasReasoning && !(toolInvocations && toolInvocations.length > 0) && messageId && (
               <div
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px]"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] ring-1 ring-red-400/15"
                 style={{
-                  background: 'rgba(248, 113, 113, 0.06)',
-                  border: '1px solid rgba(248, 113, 113, 0.15)',
+                  background: 'rgba(248, 113, 113, 0.04)',
                   color: '#F87171',
+                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05)',
                 }}
               >
                 <div className="i-ph:warning-circle w-3.5 h-3.5 shrink-0" />
