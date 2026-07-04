@@ -17,6 +17,12 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
   const startTimeRef = useRef(Date.now());
   // Track if we ever had a streaming phase (prevents 0s display)
   const wasStreamingRef = useRef(false);
+  // Auto-close gate (vercel reasoning.tsx pattern): collapse ~1s after
+  // stream ends, once only, never re-trigger. User can re-expand freely.
+  const hasAutoClosedRef = useRef(false);
+  // Did the user explicitly expand mid-stream? If so, still auto-collapse
+  // (vercel does) — but we keep the manual toggle fully responsive after.
+  const userToggledRef = useRef(false);
 
   useEffect(() => {
     if (isStreaming) {
@@ -29,14 +35,26 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
     } else if (wasStreamingRef.current) {
       // Freeze duration when streaming stops
       setThinkDuration(prev => prev || Math.round((Date.now() - startTimeRef.current) / 1000) || 1);
+      // Auto-collapse ~1s post-stream, once only (vercel AUTO_CLOSE_DELAY=1000).
+      // Respect an explicit user toggle during stream: if user opened it
+      // themselves mid-stream, leave it open for them to read.
+      if (!hasAutoClosedRef.current && !userToggledRef.current && isExpanded) {
+        hasAutoClosedRef.current = true;
+        const t = setTimeout(() => setIsExpanded(false), 1000);
+        return () => clearTimeout(t);
+      }
+      hasAutoClosedRef.current = true;
     }
-  }, [isStreaming]);
+  }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="thought-box-root">
       {/* The pill — transitions IN PLACE from "Thinking..." → "Thought for Xs" */}
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={() => {
+          userToggledRef.current = true;
+          setIsExpanded(!isExpanded);
+        }}
         className={`thought-pill ${isStreaming ? 'thought-pill-active' : 'thought-pill-done'}`}
         type="button"
         aria-expanded={isExpanded}
