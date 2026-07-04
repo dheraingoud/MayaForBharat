@@ -34,10 +34,21 @@ class Cancelled extends Error {
 }
 
 function readNimApiKey(): string {
+  // MUST mirror NimKeyRotator's key resolution (lib/workbench/llm/nim-router.ts):
+  // prefer NVIDIA_API_KEY_1..20, then legacy single-key names. The detached Convex
+  // action reads process.env at action-runtime — if these aren't probed in the same
+  // order as the rotator, the pre-flight below false-negatives the job to
+  // 'Missing LLM config' before streamText ever runs, and the user sees "generation
+  // doesn't happen". The in-browser path uses the rotator directly via cookies, so
+  // it never hit this — only the detached "Let's Build" path did.
+  for (let i = 1; i <= 20; i++) {
+    const k = process.env[`NVIDIA_API_KEY_${i}`]?.trim();
+    if (k) return k;
+  }
   return (
-    process.env.NIM_API_KEY ||
-    process.env.NVIDIA_NIM_API_KEY ||
-    process.env.API_KEY_NVIDIANIM ||
+    process.env.NVIDIA_NIM_API_KEY?.trim() ||
+    process.env.NIM_API_KEY?.trim() ||
+    process.env.API_KEY_NVIDIANIM?.trim() ||
     ''
   );
 }

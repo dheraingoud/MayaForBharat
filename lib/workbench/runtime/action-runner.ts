@@ -77,6 +77,52 @@ export class ActionRunner {
   // Auto-fix configuration
   #autoFixAttempts: Map<string, number> = new Map();
   #MAX_AUTO_FIX_ATTEMPTS = 15; // Bulletproof: don't stop until 1st version is complete
+
+  // ─── Phase D: persist the auto-fix attempt counter to sessionStorage so a
+  //     remount (browser reopen mid-fix-cycle) resumes the counter instead of
+  //     resetting to 0 — which would either re-loop the same fix forever or
+  //     burn 15 more attempts on an error auto-fix can never solve (e.g.
+  //     provider entitlement). The existing attemptKeys (start-${startCommand},
+  //     ${actionId}-${command}, preview-${msg slice}) are stable across remount
+  //     for a reloaded artifact, so they double as the persistence key — no
+  //     appId threading needed. In-memory Map stays as a per-session cache
+  //     layered over sessionStorage. Cap stays 15.
+  #attemptStorageKey(key: string): string {
+    return `maya-autofix:${key}`;
+  }
+  #getAttempt(key: string): number {
+    if (this.#autoFixAttempts.has(key)) return this.#autoFixAttempts.get(key)!;
+    try {
+      const v = typeof sessionStorage !== 'undefined'
+        ? sessionStorage.getItem(this.#attemptStorageKey(key))
+        : null;
+      const n = v ? parseInt(v, 10) : 0;
+      if (Number.isFinite(n) && n > 0) this.#autoFixAttempts.set(key, n);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+  #setAttempt(key: string, n: number): void {
+    this.#autoFixAttempts.set(key, n);
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(this.#attemptStorageKey(key), String(n));
+      }
+    } catch {
+      /* sessionStorage may be unavailable (private mode) — in-memory only */
+    }
+  }
+  #deleteAttempt(key: string): void {
+    this.#autoFixAttempts.delete(key);
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(this.#attemptStorageKey(key));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   onAutoFix?: (errorContext: {
     command: string;
     error: string;
@@ -221,8 +267,8 @@ export class ActionRunner {
 
               if (this.onAutoFix) {
                 const attemptKey = `start-${startCommand}`;
-                const currentAttempt = (this.#autoFixAttempts.get(attemptKey) || 0) + 1;
-                this.#autoFixAttempts.set(attemptKey, currentAttempt);
+                const currentAttempt = this.#getAttempt(attemptKey) + 1;
+                this.#setAttempt(attemptKey, currentAttempt);
 
                 if (currentAttempt <= this.#MAX_AUTO_FIX_ATTEMPTS) {
                   logger.info(`[AutoFix:Start] Attempt ${currentAttempt}/${this.#MAX_AUTO_FIX_ATTEMPTS} for: ${startCommand}`);
@@ -237,7 +283,7 @@ export class ActionRunner {
                 }
 
                 // Max attempts reached, clear counter and fall through to manual alert
-                this.#autoFixAttempts.delete(attemptKey);
+                this.#deleteAttempt(attemptKey);
                 logger.warn(`[AutoFix:Start] Max attempts reached for: ${startCommand}`);
               }
 
@@ -280,8 +326,8 @@ export class ActionRunner {
 
       if (isBuildCmd && this.onAutoFix) {
         const attemptKey = `${actionId}-${command}`;
-        const currentAttempt = (this.#autoFixAttempts.get(attemptKey) || 0) + 1;
-        this.#autoFixAttempts.set(attemptKey, currentAttempt);
+        const currentAttempt = this.#getAttempt(attemptKey) + 1;
+        this.#setAttempt(attemptKey, currentAttempt);
 
         if (currentAttempt <= this.#MAX_AUTO_FIX_ATTEMPTS) {
           logger.info(`[AutoFix] Attempt ${currentAttempt}/${this.#MAX_AUTO_FIX_ATTEMPTS} for: ${command}`);
@@ -296,7 +342,7 @@ export class ActionRunner {
         }
 
         // Max attempts reached, clear counter and fall through to manual alert
-        this.#autoFixAttempts.delete(attemptKey);
+        this.#deleteAttempt(attemptKey);
         logger.warn(`[AutoFix] Max attempts reached for: ${command}`);
       }
 
@@ -874,8 +920,8 @@ export class ActionRunner {
 
     if (this.onAutoFix) {
       const attemptKey = `preview-${error.message.slice(0, 50)}`;
-      const currentAttempt = (this.#autoFixAttempts.get(attemptKey) || 0) + 1;
-      this.#autoFixAttempts.set(attemptKey, currentAttempt);
+      const currentAttempt = this.#getAttempt(attemptKey) + 1;
+      this.#setAttempt(attemptKey, currentAttempt);
 
       if (currentAttempt <= this.#MAX_AUTO_FIX_ATTEMPTS) {
         logger.info(`[AutoFix:Preview] Attempt ${currentAttempt}/${this.#MAX_AUTO_FIX_ATTEMPTS}`);
@@ -889,7 +935,7 @@ export class ActionRunner {
         return;
       }
 
-      this.#autoFixAttempts.delete(attemptKey);
+      this.#deleteAttempt(attemptKey);
     }
 
     // Fall through to manual alert

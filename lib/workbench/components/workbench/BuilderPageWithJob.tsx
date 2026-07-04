@@ -170,6 +170,19 @@ export function BuilderPageWithJob({
       });
       return;
     }
+    // Survival-vs-visible gate. The in-browser stream (BuilderPage's
+    // action-runner) and this detached Convex job both generate the same app
+    // concurrently. If the in-browser path already populated
+    // workbenchStore.files, this job's file array is a duplicate source from a
+    // parallel LLM call — SKIP the write so we never clobber the live
+    // WebContainer mid-build. The detached write only matters on the
+    // come-back path: browser was closed mid-build → on reopen files are
+    // empty (nanostore resets) → detached `live` hydrates here.
+    const existingFiles = workbenchStore.files.get();
+    if (Object.keys(existingFiles).length > 0) {
+      return;
+    }
+
     const tag = `${job._id ?? ''}:${job.files.length}`;
     if (mountedFileSetRef.current === tag) return;
     mountedFileSetRef.current = tag;
@@ -202,22 +215,30 @@ export function BuilderPageWithJob({
   }, [job.status, job._id, job.files, appId]);
 
   // ── Render:
-  //   - An in-flight build (pending/building) that is *expected* — we have a
-  //     ?prompt= from a fresh approve, or an existing job row → GenerateJobCard.
-  //   - A finished-but-failed job (error/cancelled) with a row to retry → card.
-  //   - Otherwise → mount BuilderPage. This covers BOTH the live-files path
-  //     AND the "come-back later" path where the user reopens an app that has
-  //     an `apps` row + specJson but NO live generateJobs row (apps created via
-  //     /api/apps-from-plan don't mint a generateJobs row). On that path
-  //     BuilderPage's synthetic priming effect injects [user-prompt, plan] and
-  //     the progressive chat actually renders, instead of being stuck on the
-  //     loading card forever (the prior session's #1 blocker).
-  const buildingInProgress =
-    (job.status === 'pending' || job.status === 'building') &&
-    (!!prompt || !!job._id);
+  //   EAGER-MOUNT (fixes "generation doesn't happen" + "commands don't run"
+  //   + "chat redesign invisible"): for a fresh ?prompt= (and any active
+  //   build — pending/building/live) mount <BuilderPage> IMMEDIATELY so its
+  //   in-browser auto-prompt effect (BuilderPage ~L1007) fires. That effect
+  //   drives the VISIBLE generation — it streams the build into the chat
+  //   (file cards, shell/start status, the redesigned chat tree) AND the
+  //   action-runner executes the emitted bolt shell/start actions
+  //   (npm install && npm run dev) so the dev server boots and the preview
+  //   loads. All of that was unreachable before because this wrapper parked
+  //   the user on a <GenerateJobCard> spinner for the whole detached build —
+  //   BuilderPage never mounted, the chat stayed empty, AutoStart bailed on
+  //   `hasMessages`, and npm install/dev never ran.
+  //
+  //   The detached Convex job still runs in parallel (created above) as a
+  //   survival backup: if the user closes the tab, the job completes
+  //   server-side; on reopen its `live` files hydrate the WebContainer —
+  //   gated in the effect above on workbenchStore.files being empty so it
+  //   never clobbers the in-browser path's live files.
+  //
+  //   The GenerateJobCard is shown ONLY for an explicit retry of a
+  //   failed/cancelled job (has a row + error/cancelled status). The active
+  //   build is now owned end-to-end by the chat.
   const showCard =
-    buildingInProgress ||
-    (!!job._id && (job.status === 'error' || job.status === 'cancelled'));
+    !!job._id && (job.status === 'error' || job.status === 'cancelled');
 
   if (showCard) {
     return (

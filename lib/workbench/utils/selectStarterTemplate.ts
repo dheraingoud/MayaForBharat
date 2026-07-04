@@ -67,6 +67,12 @@ const templates: Template[] = STARTER_TEMPLATES.filter((t) => !t.name.includes('
 
 const parseSelectedTemplate = (llmOutput: string): { template: string; title: string } | null => {
   try {
+    // Guard: template-selection LLM call can return an error envelope
+    // ({error:true,...}) with no `.text`, surfacing here as undefined/null.
+    // Bail to the blank-template fallback instead of crashing on `.match`.
+    if (!llmOutput || typeof llmOutput !== 'string') {
+      return null;
+    }
     // Extract content between <templateName> tags
     const templateNameMatch = llmOutput.match(/<templateName>(.*?)<\/templateName>/);
     const titleMatch = llmOutput.match(/<title>(.*?)<\/title>/);
@@ -94,8 +100,15 @@ export const selectStarterTemplate = async (options: { message: string; model: s
     method: 'POST',
     body: JSON.stringify(requestBody),
   });
-  const respJson: { text: string } = await response.json();
-  console.log(respJson);
+  const respJson: { text?: string; error?: boolean; message?: string } = await response.json();
+
+  // Template selection is best-effort: if the LLM call errored (rate limit,
+  // 401, etc.) the response is an error envelope with no `.text`. Log once
+  // and fall back to the blank template instead of crashing parseSelectedTemplate.
+  if (respJson.error || !respJson.text) {
+    console.log('Template selection LLM call failed, using blank template:', respJson.message || 'no text');
+    return { template: 'blank', title: '' };
+  }
 
   const { text } = respJson;
   const selectedTemplate = parseSelectedTemplate(text);
