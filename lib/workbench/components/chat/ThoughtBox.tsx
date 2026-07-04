@@ -3,9 +3,15 @@ import { useState, useEffect, useRef, type PropsWithChildren } from 'react';
 interface ThoughtBoxProps {
   title?: string;
   isStreaming?: boolean; // true = actively thinking, false = done
+  language?: 'hi' | 'en'; // localize label to match the user's chat language
 }
 
-const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<ThoughtBoxProps>) => {
+// MAYA speaks the user's language. The pill morphs in place:
+//   thinking  → "Thinking"           / "Soch rahi hoon"
+//   done      → "Thought for Xs"     / "{n} sec mein socha"
+// The reasoning content itself is buffered (never streamed live in the pill);
+// the optional chevron reveals the buffered text on click, never live.
+const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: PropsWithChildren<ThoughtBoxProps>) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [thinkDuration, setThinkDuration] = useState(0);
   const startTimeRef = useRef(Date.now());
@@ -35,12 +41,14 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
         type="button"
         aria-expanded={isExpanded}
       >
-        {/* Sparkle icon — spins during thinking, static when done */}
-        <span className={`thought-sparkle ${isStreaming ? 'sparkle-spin' : ''}`}>✦</span>
+        {/* Brain icon — gentle pulse while thinking, static when done (no emoji) */}
+        <div className={`i-ph:brain w-3 h-3 thought-sparkle ${isStreaming ? 'brain-pulse' : ''}`} />
 
         {/* Label — smoothly changes in place */}
         <span className="thought-label">
-          {isStreaming ? 'Thinking' : `Thought for ${thinkDuration || 1}s`}
+          {isStreaming
+            ? (language === 'hi' ? 'Soch rahi hoon' : 'Thinking')
+            : (language === 'hi' ? `${thinkDuration || 1} sec mein socha` : `Thought for ${thinkDuration || 1}s`)}
         </span>
 
         {/* Animated dots — only during thinking, fades out when done */}
@@ -96,8 +104,10 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
           border: 1px solid transparent;
           background: transparent;
           letter-spacing: -0.01em;
-          /* Smooth ALL property transitions for in-place morphing */
-          transition: color 0.4s ease, background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease, padding 0.3s ease;
+          /* Liquid-glass inner refraction: 1px inner highlight + tinted inner shadow */
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+          /* Smooth ALL property transitions for in-place morphing — custom spring-ish curve, never linear/ease-in-out */
+          transition: color 0.45s cubic-bezier(0.32, 0.72, 0, 1), background 0.45s cubic-bezier(0.32, 0.72, 0, 1), border-color 0.45s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.45s cubic-bezier(0.32, 0.72, 0, 1), padding 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         /* ─── Active state: shimmer glare + glow ─── */
@@ -105,7 +115,7 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
           color: #E8601A;
           border-color: rgba(232,96,26,0.18);
           background: linear-gradient(135deg, rgba(232,96,26,0.06) 0%, rgba(232,96,26,0.02) 100%);
-          box-shadow: 0 0 0 1px rgba(232,96,26,0.05), 0 1px 3px rgba(232,96,26,0.08);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(232,96,26,0.05), 0 1px 3px rgba(232,96,26,0.08);
         }
         .thought-pill-active::after {
           content: '';
@@ -122,7 +132,7 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
             rgba(232,96,26,0.12) 65%,
             transparent 100%
           );
-          animation: glare 2s ease-in-out infinite;
+          animation: glare 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
           pointer-events: none;
         }
         @keyframes glare {
@@ -150,22 +160,19 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
           border-color: rgba(232,96,26,0.15);
         }
 
-        /* ─── Sparkle ─── */
+        /* ─── Brain icon ─── */
         .thought-sparkle {
-          font-size: 10px;
           position: relative;
           z-index: 1;
-          transition: transform 0.3s ease;
+          flex-shrink: 0;
+          transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .sparkle-spin {
-          animation: sparkle-rotate 3s linear infinite;
+        .brain-pulse {
+          animation: brain-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
-        @keyframes sparkle-rotate {
-          0% { transform: rotate(0deg) scale(1); }
-          25% { transform: rotate(90deg) scale(1.15); }
-          50% { transform: rotate(180deg) scale(1); }
-          75% { transform: rotate(270deg) scale(1.15); }
-          100% { transform: rotate(360deg) scale(1); }
+        @keyframes brain-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.9; }
+          50% { transform: scale(1.18); opacity: 1; }
         }
 
         /* ─── Label — stays in place, text changes ─── */
@@ -181,7 +188,7 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
           gap: 0;
           position: relative;
           z-index: 1;
-          transition: opacity 0.3s ease, width 0.3s ease;
+          transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
           overflow: hidden;
         }
         .dots-visible {
@@ -193,7 +200,7 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
           width: 0;
         }
         .dot {
-          animation: dot-bounce 1.4s ease-in-out infinite;
+          animation: dot-bounce 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
           font-weight: 800;
           font-size: 12px;
         }
@@ -209,7 +216,7 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
           color: rgba(232,96,26,0.45);
           position: relative;
           z-index: 1;
-          transition: opacity 0.3s ease, width 0.3s ease, margin 0.3s ease;
+          transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin 0.3s cubic-bezier(0.16, 1, 0.3, 1);
           overflow: hidden;
           white-space: nowrap;
         }
@@ -228,7 +235,7 @@ const ThoughtBox = ({ title, children, isStreaming = false }: PropsWithChildren<
         .thought-chevron {
           position: relative;
           z-index: 1;
-          transition: opacity 0.3s ease, transform 0.2s ease, width 0.3s ease, margin 0.3s ease;
+          transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin 0.3s cubic-bezier(0.16, 1, 0.3, 1);
           overflow: hidden;
         }
         .chevron-visible {

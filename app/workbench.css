@@ -295,6 +295,29 @@
   scrollbar-color: var(--modern-scrollbar-thumb-background) transparent;
 }
 
+/* ─── Terminal-only inverse scrollbar (Maya-accent on deep black) ──── */
+/* The main terminal uses this on its host div so any outer overflow renders
+   with the Maya accent thumb instead of the dim neutral used by the code
+   editor. xterm's own .xterm-viewport (below) keeps its separate styling. */
+.modern-scrollbar-invert {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(232, 96, 26, 0.22) transparent;
+}
+.modern-scrollbar-invert::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.modern-scrollbar-invert::-webkit-scrollbar-thumb {
+  background: rgba(232, 96, 26, 0.20);
+  border-radius: 3px;
+}
+.modern-scrollbar-invert::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 96, 26, 0.35);
+}
+.modern-scrollbar-invert::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* ─── Xterm Terminal Scrollbar (thin, MAYA-themed) ───────────────────── */
 .xterm .xterm-viewport {
   scrollbar-width: thin;

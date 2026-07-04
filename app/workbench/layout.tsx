@@ -31,7 +31,7 @@ export default function WorkbenchLayout({
       className="workbench-layout bg-bolt-elements-bg-depth-1"
       data-theme="dark"
       style={{
-        height: '100vh',
+        height: '100dvh',
         width: '100%',
         maxWidth: '100vw',
         minWidth: 0,

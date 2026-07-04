@@ -30,6 +30,10 @@ export const Terminal = memo(
       const terminalRef = useRef<XTerm>();
       const fitAddonRef = useRef<FitAddon>();
       const resizeObserverRef = useRef<ResizeObserver>();
+      // Stick-to-bottom scroll tracking. Without this, onWriteParsed fires
+      // scrollToBottom unconditionally and yanks the viewport back down when a
+      // user has scrolled up to read history — the "unscrollable" bug.
+      const userScrolledUpRef = useRef(false);
 
       useEffect(() => {
         const element = terminalElementRef.current!;
@@ -54,6 +58,9 @@ export const Terminal = memo(
           allowProposedApi: true,
           scrollback: 10000,
           scrollOnUserInput: true,
+          scrollSensitivity: 3,
+          fastScrollSensitivity: 5,
+          fastScrollModifier: 'alt',
 
           // Enable better clipboard handling
           rightClickSelectsWord: true,
@@ -96,15 +103,50 @@ export const Terminal = memo(
         resizeObserverRef.current = resizeObserver;
         resizeObserver.observe(element);
 
-        // Auto-scroll to bottom when new data is written
+        // Track user scroll intent: when the viewport moves off the bottom
+        // (viewportY < baseY), the user is reading history — suppress
+        // auto-scroll so writes don't yank them back down. onResume gets
+        // them back to bottom and re-enables auto-follow.
+        const isAtBottom = () => {
+          try {
+            const buf = terminal.buffer.active;
+            return buf.viewportY >= buf.baseY;
+          } catch {
+            return true;
+          }
+        };
+
+        const onScrollDisposable = terminal.onScroll(() => {
+          userScrolledUpRef.current = !isAtBottom();
+        });
+
+        // Auto-scroll to bottom on new data ONLY when the user is already
+        // at the bottom. This is the fix for the "unscrollable" bug — the
+        // previous code called scrollToBottom unconditionally.
         const onWriteDisposable = terminal.onWriteParsed(() => {
+          if (!userScrolledUpRef.current) {
+            terminal.scrollToBottom();
+          }
+        });
+
+        // Re-enable auto-follow when the user types — they're engaging the
+        // prompt again and expect to see their command's output stream by.
+        const onDataDisposable = terminal.onData(() => {
+          userScrolledUpRef.current = false;
           terminal.scrollToBottom();
         });
 
-        // Refit after a brief delay to handle initial layout
-        setTimeout(() => {
-          try { fitAddon.fit(); } catch { /* ignore */ }
-        }, 50);
+        // Double-RAF initial fit instead of a fixed setTimeout race — the
+        // outer RAF waits for the layout pass, the inner RAF waits for the
+        // paint, so xterm measures the real container box.
+        const fitInitial = () => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              try { fitAddon.fit(); } catch { /* ignore */ }
+            });
+          });
+        };
+        fitInitial();
 
         logger.debug(`Attach [${id}]`);
 
@@ -113,6 +155,8 @@ export const Terminal = memo(
         return () => {
           try {
             onWriteDisposable.dispose();
+            onScrollDisposable.dispose();
+            onDataDisposable.dispose();
             resizeObserver.disconnect();
             terminal.dispose();
           } catch (error) {

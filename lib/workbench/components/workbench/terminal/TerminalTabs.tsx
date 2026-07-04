@@ -28,6 +28,13 @@ export const TerminalTabs = memo(() => {
   const [activeTerminal, setActiveTerminal] = useState(0);
   const [terminalCount, setTerminalCount] = useState(0);
 
+  // Status-bar state: elapsed timer ties to streamingState; line count polled
+  // from the active xterm buffer. Both render in the 24px status bar below.
+  const [elapsed, setElapsed] = useState(0);
+  const [lineCount, setLineCount] = useState(0);
+  const startTimeRef = useRef<number | null>(null);
+  const wasStreamingRef = useRef(false);
+
   const addTerminal = () => {
     if (terminalCount < MAX_TERMINALS) {
       setTerminalCount(terminalCount + 1);
@@ -115,11 +122,47 @@ export const TerminalTabs = memo(() => {
     };
   }, []);
 
+  // Elapsed timer — mirrors ThoughtBox cadence. Starts when streaming begins,
+  // freezes at last value when it ends (keeps the final duration visible).
+  useEffect(() => {
+    if (isStreaming) {
+      wasStreamingRef.current = true;
+      if (startTimeRef.current === null) {
+        startTimeRef.current = Date.now();
+      }
+      const id = setInterval(() => {
+        if (startTimeRef.current !== null) {
+          setElapsed(Math.round((Date.now() - startTimeRef.current) / 1000));
+        }
+      }, 1000);
+      return () => clearInterval(id);
+    } else if (wasStreamingRef.current && startTimeRef.current !== null) {
+      setElapsed(Math.round((Date.now() - startTimeRef.current) / 1000));
+      startTimeRef.current = null;
+    }
+  }, [isStreaming]);
+
+  // Line count — polled from the active terminal's xterm buffer. 500ms is
+  // cheap (read-only buffer.length, no DOM) and keeps the status bar live
+  // as commands emit output.
+  useEffect(() => {
+    const readLines = () => {
+      const ref = terminalRefs.current.get(activeTerminal);
+      const terminal = ref?.getTerminal();
+      if (terminal) {
+        setLineCount(terminal.buffer.active.length);
+      }
+    };
+    readLines();
+    const id = setInterval(readLines, 500);
+    return () => clearInterval(id);
+  }, [activeTerminal, terminalCount]);
+
   return (
     <Panel
       ref={terminalPanelRef}
       defaultSize={showTerminal ? DEFAULT_TERMINAL_SIZE : 0}
-      minSize={10}
+      minSize={20}
       collapsible
       onExpand={() => {
         if (!terminalToggledByShortcut.current) {
@@ -146,6 +189,13 @@ export const TerminalTabs = memo(() => {
             borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
           }}
         >
+          {/* Traffic-light dots — macOS-style branding, decorative */}
+          <div className="flex items-center gap-[6px] pl-1 pr-2 mr-1 shrink-0" aria-hidden>
+            <span className="w-[10px] h-[10px] rounded-full" style={{ background: '#FF5F57' }} />
+            <span className="w-[10px] h-[10px] rounded-full" style={{ background: '#FFBD2E' }} />
+            <span className="w-[10px] h-[10px] rounded-full" style={{ background: '#27C840' }} />
+          </div>
+
           {/* Terminal tabs */}
           {Array.from({ length: terminalCount + 1 }, (_, index) => {
             const isActive = activeTerminal === index;
@@ -366,7 +416,8 @@ export const TerminalTabs = memo(() => {
           />
         </div>
 
-        {/* ─── Terminal panels ─── */}
+        {/* ─── Terminal panels — flex-1 region between header & status bar ─── */}
+        <div className="flex-1 min-h-0 relative overflow-hidden">
         {Array.from({ length: terminalCount + 1 }, (_, index) => {
           const isActive = activeTerminal === index;
 
@@ -376,7 +427,7 @@ export const TerminalTabs = memo(() => {
                 <Terminal
                   key={`terminal-${index}`}
                   id={`terminal_${index}`}
-                  className={classNames('h-full overflow-hidden modern-scrollbar-invert', {
+                  className={classNames('h-full modern-scrollbar-invert', {
                     hidden: !isActive,
                   })}
                   ref={(ref) => {
@@ -420,6 +471,43 @@ export const TerminalTabs = memo(() => {
             );
           }
         })}
+        </div>
+
+        {/* ─── Status bar — 24px: running/idle dot + elapsed + line count ─── */}
+        <div
+          className="flex items-center gap-2 min-h-[24px] px-3 shrink-0 text-[10px] font-mono tracking-tight"
+          style={{
+            background: 'rgba(10, 10, 9, 0.9)',
+            borderTop: '1px solid rgba(255, 255, 255, 0.03)',
+            color: '#6B6560',
+          }}
+        >
+          <span className="flex items-center gap-1.5">
+            <span
+              className={classNames('w-[6px] h-[6px] rounded-full transition-all duration-300', isStreaming ? 'bg-amber-400' : 'bg-emerald-400')}
+              style={isStreaming ? {
+                boxShadow: '0 0 6px rgba(251, 191, 36, 0.5)',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              } : {
+                boxShadow: '0 0 4px rgba(52, 211, 153, 0.3)',
+              }}
+            />
+            <span style={{ color: isStreaming ? '#D4D0CA' : '#4A4742' }}>
+              {isStreaming ? 'Running' : 'Idle'}
+            </span>
+          </span>
+
+          {isStreaming && elapsed > 0 && (
+            <span style={{ color: '#9E9890' }}>{elapsed}s</span>
+          )}
+
+          {/* Spacer pushes meta to the right */}
+          <div className="ml-auto flex items-center gap-3" style={{ color: '#4A4742' }}>
+            <span>{lineCount} lines</span>
+            <span style={{ color: '#3A3835' }}>·</span>
+            <span className="uppercase tracking-wider">bash</span>
+          </div>
+        </div>
       </div>
     </Panel>
   );

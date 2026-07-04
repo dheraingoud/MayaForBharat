@@ -32,12 +32,46 @@ export const listAll = query({
 export const removeByAppId = mutation({
   args: { appId: v.string() },
   handler: async (ctx, { appId }) => {
+    // Two "app ids" coexist in the schema:
+    //   - apps.appId (UUID string field) — used by generateJobs.appId (no FK).
+    //   - apps._id (Convex Id<"apps">) — used by improvements.appId + evolutionLog.appId (FK).
+    // Resolve the apps row by UUID first so FK children can be filtered by _id.
+    // generateJobs is cleaned by UUID string regardless (it has no FK and can orphan).
+
+    const jobs = await ctx.db
+      .query("generateJobs")
+      .withIndex("by_app", (q) => q.eq("appId", appId))
+      .collect()
+    for (const row of jobs) await ctx.db.delete(row._id)
+
     const app = await ctx.db
       .query("apps")
       .withIndex("by_app_id", (q) => q.eq("appId", appId))
       .first()
+    let improvements = 0
+    let evolution = 0
     if (app) {
+      const impRows = await ctx.db
+        .query("improvements")
+        .withIndex("by_app", (q) => q.eq("appId", app._id))
+        .collect()
+      improvements = impRows.length
+      for (const row of impRows) await ctx.db.delete(row._id)
+
+      const evoRows = await ctx.db
+        .query("evolutionLog")
+        .withIndex("by_app", (q) => q.eq("appId", app._id))
+        .collect()
+      evolution = evoRows.length
+      for (const row of evoRows) await ctx.db.delete(row._id)
+
       await ctx.db.delete(app._id)
+    }
+    return {
+      deleted: app ? 1 : 0,
+      improvements,
+      evolutionLog: evolution,
+      generateJobs: jobs.length,
     }
   },
 })

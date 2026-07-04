@@ -8,11 +8,13 @@ import type {
   StepStartUIPart,
 } from 'ai';
 import { classNames } from '@/lib/workbench/utils/classNames';
+import { detectLanguage } from '@/lib/workbench/utils/detectLanguage';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
 import { toast } from 'react-toastify';
 import { forwardRef } from 'react';
 import type { ForwardedRef } from 'react';
+import { motion } from 'framer-motion';
 import type { ProviderInfo } from '@/lib/workbench/types/model';
 
 // Match the parts union expected by UserMessage / AssistantMessage props.
@@ -86,14 +88,40 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
               // template literal differs, and both children accept every part kind.
               const childParts = parts as MessageParts[] | undefined;
 
+              // MAYA speaks the user's language. For each assistant reply, detect
+              // the language of the nearest preceding USER message (Devanagari→hi
+              // else en) and thread it down so chrome labels match the conversation.
+              // Not a static toggle — re-derived per message as the user switches.
+              const language = isUserMessage ? 'en' : (() => {
+                for (let j = index; j >= 0; j--) {
+                  if (messages[j].role === 'user') {
+                    const uc = (messages[j].parts ?? [])
+                      .filter((p): p is TextUIPart => p.type === 'text' && 'text' in p)
+                      .map((p) => p.text)
+                      .join('');
+                    return detectLanguage(uc);
+                  }
+                }
+                return 'en' as const;
+              })();
+
               return (
-                <div
+                <motion.div
                   key={index}
                   className={classNames('flex w-full', {
                     'mt-4': !isFirst,
                     'justify-end': isUserMessage,
                     'justify-start': !isUserMessage,
                   })}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 120,
+                    damping: 20,
+                    duration: 0.5,
+                    delay: Math.min(index * 0.04, 0.4),
+                  }}
                 >
                   <div className={classNames('', {
                     'max-w-[85%] ml-auto': isUserMessage,
@@ -114,16 +142,22 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                         parts={childParts}
                         addToolResult={props.addToolResult}
                         isStreaming={isStreaming && index === messages.length - 1}
+                        language={language}
                       />
                     )}
                   </div>
-                </div>
+                </motion.div>
               );
             })
           : null}
         {/* Streaming indicator: only show when streaming AND the last message hasn't started rendering yet */}
         {isStreaming && (messages.length === 0 || messages[messages.length - 1]?.role === 'user') && (
-          <div className="flex items-center gap-3 w-full mt-4 px-1">
+          <motion.div
+            className="flex items-center gap-3 w-full mt-4 px-1"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 120, damping: 18, duration: 0.5 }}
+          >
             {/* MAYA logo shimmer */}
             <div
               className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
@@ -148,7 +182,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                 style={{ animationDelay: '300ms', animationDuration: '0.8s' }}
               />
             </div>
-          </div>
+          </motion.div>
         )}
       </div>
     );

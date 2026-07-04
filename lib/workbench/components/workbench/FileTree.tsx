@@ -608,7 +608,7 @@ function Folder({ folder, collapsed, selected = false, onCopyPath, onCopyRelativ
         onClick={onClick}
       >
         <div className="flex items-center w-full">
-          <div className="flex-1 truncate pr-2">{folder.name}</div>
+          <div className="flex-1 min-w-0 truncate pr-2">{folder.name}</div>
           {isLocked && (
             <span
               className={classNames('shrink-0', 'i-ph:lock-simple scale-80 text-red-500')}
@@ -703,7 +703,7 @@ function File({
             'group-hover:text-bolt-elements-item-contentActive': !selected,
           })}
         >
-          <div className="flex-1 truncate pr-2">{name}</div>
+          <div className="flex-1 min-w-0 truncate pr-2">{name}</div>
           <div className="flex items-center gap-1">
             {showStats && (
               <div className="flex items-center gap-1 text-xs">

@@ -448,7 +448,7 @@ export default function LandingPage() {
 
   // Build markdown for plan display
   const buildPlanMarkdown = (plan: any): string => {
-    let md = `## 📋 ${plan.name || 'App Plan'}\n\n`
+    let md = `## ${plan.name || 'App Plan'}\n\n`
     if (plan.description) md += `${plan.description}\n\n`
     if (plan.features?.length) {
       md += `### Features\n`

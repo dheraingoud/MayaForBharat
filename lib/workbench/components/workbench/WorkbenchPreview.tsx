@@ -126,7 +126,7 @@ export const WorkbenchPreview = memo(({ viewport = 'desktop', viewportSetter }: 
             <RefreshCw className="w-3 h-3" strokeWidth={1.5} />
           </button>
 
-          <div className="flex-1 px-2.5 py-[3px] bg-[#1A1917] ring-1 ring-white/[0.04] rounded-md text-[10px] text-[#6B6560] truncate font-mono flex items-center gap-1.5">
+          <div className="flex-1 min-w-0 px-2.5 py-[3px] bg-[#1A1917] ring-1 ring-white/[0.04] rounded-md text-[10px] text-[#6B6560] truncate font-mono flex items-center gap-1.5">
             {!iframeUrl && isStreaming ? (
               <><span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" /><span className="text-amber-400/80">Building app...</span></>
             ) : !iframeUrl ? (

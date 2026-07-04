@@ -41,11 +41,12 @@ export function UserMessage({ content, parts }: UserMessageProps) {
       <div className="overflow-hidden flex flex-col gap-2 items-end">
         {/* User message bubble */}
         <div
-          className="px-4 py-2.5 w-fit max-w-[85%] rounded-2xl rounded-br-md text-[13px] leading-[1.6]"
+          className="px-4 py-2.5 w-fit max-w-[85%] rounded-2xl rounded-br-md text-[14px] leading-relaxed"
           style={{
-            background: 'rgba(232, 96, 26, 0.10)',
-            border: '1px solid rgba(232, 96, 26, 0.12)',
-            color: '#D4D0CA',
+            background: 'rgba(232, 96, 26, 0.04)',
+            border: '1px solid rgba(232, 96, 26, 0.10)',
+            color: '#F5F4F0',
+            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
           }}
         >
           {textContent && <span>{textContent}</span>}
@@ -67,11 +68,12 @@ export function UserMessage({ content, parts }: UserMessageProps) {
 
   return (
     <div
-      className="px-4 py-2.5 w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] text-[13px] leading-[1.6]"
+      className="px-4 py-2.5 w-fit rounded-2xl rounded-br-md ml-auto max-w-[85%] text-[14px] leading-relaxed"
       style={{
-        background: 'rgba(232, 96, 26, 0.10)',
-        border: '1px solid rgba(232, 96, 26, 0.12)',
-        color: '#D4D0CA',
+        background: 'rgba(232, 96, 26, 0.04)',
+        border: '1px solid rgba(232, 96, 26, 0.10)',
+        color: '#F5F4F0',
+        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
       }}
     >
       {images.length > 0 && (
@@ -125,11 +127,23 @@ function resolveContent(
 function stripMetadata(content: string) {
   if (!content) return '';
   const artifactRegex = /<boltArtifact\s+[^>]*>[\s\S]*?<\/boltArtifact>/gm;
+  // Defense-in-depth: strip any stray <boltAction>…</boltAction> tags so
+  // bolt internals NEVER surface in the user's chat bubble. The auto-run
+  // safety net now injects commands directly (BuilderPage) instead of
+  // re-prompting with raw XML, but a model could still emit a stray tag.
+  const actionRegex = /<boltAction\s+[^>]*>[\s\S]*?<\/boltAction>/gm;
+  const selfClosingActionRegex = /<boltAction\s+[^>]*\/>/gm;
   const planContextRegex = /\n*---\s*APP PLAN.*?---\s*END PLAN\s*---.*?architecture\./gs;
+  // Strip the hidden mandatory-pipeline instruction block if it ever leaks
+  const pipelineRegex = /\n*---\s*MANDATORY BUILD PIPELINE.*?(?:render correctly\.)\n*/gs;
   return content
     .replace(MODEL_REGEX, '')
     .replace(PROVIDER_REGEX, '')
     .replace(artifactRegex, '')
+    .replace(actionRegex, '')
+    .replace(selfClosingActionRegex, '')
     .replace(planContextRegex, '')
+    .replace(pipelineRegex, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

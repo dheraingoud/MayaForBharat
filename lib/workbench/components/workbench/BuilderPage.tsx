@@ -213,8 +213,14 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   const searchParams = useSearchParams()
 
   // ─── Auto-retry state ────────────────────────────────────────────────────────
-  const retryRef = useRef({ count: 0, lastUserMsg: '' })
-  const RETRY_DELAYS = [2000, 5000, 10000] // Exponential backoff: 2s, 5s, 10s
+  // Bulletproof model recovery: transient errors use 2/5/10s; NIM quota errors use
+  // 30/90/240s (cooldown across the worker's rate-limit window). MAX_CHAT_RETRIES
+  // extended on quota path because the window is minutes, not seconds.
+  const retryRef = useRef({ count: 0, lastUserMsg: '', isQuota: false })
+  const RETRY_DELAYS = [2000, 5000, 10000]
+  const QUOTA_RETRY_DELAYS = [30_000, 90_000, 240_000]
+  const QUOTA_MAX_RETRIES = 5
+  const TRANSIENT_MAX_RETRIES = 3
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Track latest messages for beforeunload flush
   const latestMessagesRef = useRef<UIMessage[]>([])
@@ -282,18 +288,44 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       const attempt = retryRef.current.count
       const lastMsg = retryRef.current.lastUserMsg
 
-      // Auto-retry with exponential backoff (max 3 attempts)
-      if (attempt < 3 && lastMsg) {
-        const delay = RETRY_DELAYS[attempt] || 10000
+      // Probe the raw provider payload — AI SDK nests real message under
+      // messageResponse.body / data.message; fall back to top-level message/status.
+      const rawErr =
+        (e as any)?.messageResponse?.body ||
+        (e as any)?.data?.message ||
+        (e as any)?.message ||
+        (e as any)?.statusText ||
+        ''
+      const errText = String(typeof rawErr === 'string' ? rawErr : JSON.stringify(rawErr))
+      const isQuota =
+        /(resource[\s_-]*exhausted|request\s*limit\s*reached|rate[\s_-]*limit|quota\s*exceed|too\s*many\s*requests)/i.test(
+          errText,
+        )
+
+      // Bulletproof recovery: longer window + more retries on NIM quota errors.
+      const maxAttempts = isQuota ? QUOTA_MAX_RETRIES : TRANSIENT_MAX_RETRIES
+      const delayTable = isQuota ? QUOTA_RETRY_DELAYS : RETRY_DELAYS
+      const delay = delayTable[attempt] ?? delayTable[delayTable.length - 1] ?? 10000
+
+      if (attempt < maxAttempts && lastMsg) {
         retryRef.current.count++
-        logger.warn(`[AutoRetry] Attempt ${attempt + 1}/3 — retrying in ${delay / 1000}s`, e)
-        toast.warn(`Connection issue. Retrying in ${delay / 1000}s... (${attempt + 1}/3)`, {
-          autoClose: delay,
-          toastId: 'auto-retry',
-        })
+        retryRef.current.isQuota = isQuota
+        const tag = isQuota ? 'QUOTA' : 'TRANSIENT'
+        logger.warn(`[AutoRetry ${tag}] Attempt ${attempt + 1}/${maxAttempts} — retrying in ${delay / 1000}s`, e)
+        // Clear any stale retry toast before showing the next phase
+        toast.dismiss('auto-retry')
+        toast.warn(
+          isQuota
+            ? `MAYA hit its API rate limit — retrying in ${delay / 1000}s... (${attempt + 1}/${maxAttempts})`
+            : `Connection issue. Retrying in ${delay / 1000}s... (${attempt + 1}/${maxAttempts})`,
+          {
+            autoClose: delay,
+            toastId: 'auto-retry',
+          },
+        )
         retryTimerRef.current = setTimeout(() => {
           if (!streamingState.get()) {
-            logger.info(`[AutoRetry] Retrying now (attempt ${attempt + 1})`)
+            logger.info(`[AutoRetry ${tag}] Retrying now (attempt ${attempt + 1})`)
             chatSendMessage({ text: lastMsg })
           }
         }, delay)
@@ -301,11 +333,17 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         // Final failure — show persistent error
         setFakeLoading(false)
         retryRef.current.count = 0
-        logger.error('Chat request failed after all retries', e)
-        toast.error('Build paused due to connection issues. Send a message to resume.', {
-          autoClose: false,
-          toastId: 'retry-failed',
-        })
+        retryRef.current.isQuota = false
+        logger.error(`Chat request failed after all retries (quota=${isQuota})`, e)
+        toast.error(
+          isQuota
+            ? 'Build paused — API rate limit window exhausted. Send a message to retry.'
+            : 'Build paused due to connection issues. Send a message to resume.',
+          {
+            autoClose: false,
+            toastId: 'retry-failed',
+          },
+        )
       }
     },
     onFinish: ({ message }) => {
@@ -538,9 +576,11 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     const allArtifacts = workbenchStore.artifacts.get()
     let hasFileActions = false
     let hasShellOrStartActions = false
+    let targetArtifactId: string | null = null
 
-    for (const artifact of Object.values(allArtifacts)) {
+    for (const [artifactId, artifact] of Object.entries(allArtifacts)) {
       if (!artifact?.runner) continue
+      if (targetArtifactId === null) targetArtifactId = artifactId
       const actions = artifact.runner.actions.get()
       for (const action of Object.values(actions)) {
         if (action.type === 'file') hasFileActions = true
@@ -548,15 +588,39 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       }
     }
 
-    if (hasFileActions && !hasShellOrStartActions && autoRunAttemptsRef.current < MAX_AUTO_RUN_CYCLES) {
+    if (hasFileActions && !hasShellOrStartActions && autoRunAttemptsRef.current < MAX_AUTO_RUN_CYCLES && targetArtifactId) {
       autoRunAttemptsRef.current += 1
-      logger.info(`[AutoRun] Model wrote files but no shell/start actions — auto-running (cycle ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})`)
-      toast.info('🚀 Auto-starting the project...', { autoClose: 3000, toastId: 'auto-run' })
+      logger.info(`[AutoRun] Model wrote files but no shell/start actions — injecting pipeline directly (cycle ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})`)
+      toast.info('Auto-starting the project...', { autoClose: 3000, toastId: 'auto-run' })
 
-      const autoRunMsg = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\nThe files have been written but the project was not started. Run the FULL pipeline now:\n1. Install: \`<boltAction type="shell">npm install</boltAction>\`\n2. Build: \`<boltAction type="shell">npm run build</boltAction>\`\n3. Tests: \`<boltAction type="shell">npx vitest run --reporter=verbose 2>&amp;1 || true</boltAction>\`\n4. Dev server: \`<boltAction type="start">npm run dev</boltAction>\`\n\nDo NOT explain anything. Just output the boltArtifact with the shell and start actions.`
+      // Bug B+C fix: execute the pipeline DIRECTLY against the action runner
+      // instead of re-prompting the model with a fake user message. The old
+      // approach sent raw <boltAction> XML as a user message — that leaked
+      // bolt internals into the chat ("you did not run the dev…") and relied
+      // on the model re-emitting the tags, which it often skipped. Direct
+      // injection guarantees the commands run and produces zero chat output,
+      // so the user only ever sees what they typed. Reuses the same
+      // ActionCallbackData shape + execution path the streaming parser uses
+      // (useMessageParser onActionClose → workbenchStore.addAction/runAction).
+      const synthMessageId = `autorun-${Date.now()}`
+      const pipeline: { type: 'shell' | 'start'; content: string }[] = [
+        { type: 'shell', content: 'npm install' },
+        { type: 'shell', content: 'npm run build' },
+        { type: 'shell', content: 'npx vitest run --reporter=verbose 2>&1 || true' },
+        { type: 'start', content: 'npm run dev' },
+      ]
       setTimeout(() => {
-        if (!streamingState.get()) {
-          trackedSendMessage({ text: autoRunMsg })
+        if (streamingState.get()) return
+        for (let i = 0; i < pipeline.length; i++) {
+          const step = pipeline[i]
+          const data = {
+            artifactId: targetArtifactId,
+            messageId: synthMessageId,
+            actionId: `autorun-${synthMessageId}-${i}`,
+            action: { type: step.type, content: step.content } as import('@/lib/workbench/types/actions').BoltAction,
+          }
+          workbenchStore.addAction(data)
+          workbenchStore.runAction(data, false)
         }
       }, 500)
     }
@@ -704,7 +768,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
       autoRunAttemptsRef.current += 1
       logger.info(`[PreviewHealth] No preview after 30s — auto-fixing (cycle ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})`)
-      toast.info('🔍 No preview detected — checking for errors...', {
+      toast.info('No preview detected — checking for errors...', {
         autoClose: 3000,
         toastId: 'preview-health',
       })
@@ -813,7 +877,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       }
 
       logger.info('[AutoStart] Reloaded project detected — auto-starting dev server (no AI needed)')
-      toast.info('🚀 Restoring project preview...', { autoClose: 4000, toastId: 'auto-start-reload' })
+      toast.info('Restoring project preview...', { autoClose: 4000, toastId: 'auto-start-reload' })
 
       // Use the WebContainer to run install + dev directly
       import('@/lib/workbench/webcontainer').then(({ webcontainer }) => {
@@ -924,7 +988,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         }
 
         // Build a rich markdown plan message visible to the user
-        let planMd = `## 📋 ${plan.name || 'App Plan'}\n\n`
+        let planMd = `## ${plan.name || 'App Plan'}\n\n`
         if (plan.description) planMd += `${plan.description}\n\n`
 
         if (plan.features?.length) {
@@ -968,10 +1032,9 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       }
     } catch { /* ignore sessionStorage errors */ }
 
-    // 1. If there's a plan, inject the plan assistant message first so it appears before the model responds
-    if (planAssistantMsg) {
-      setMessages([...messages, planAssistantMsg])
-    }
+    // 1. Plan injection is DEFERRED to the send-timeout below so the user
+    //    prompt lands as msg[0] and the plan as msg[1] — never plan-then-prompt
+    //    (the original lander-order bug).
 
     // 2. Set chatId early so storeMessageHistory writes to the correct IDB key
     const resolvedChatId = appIdRef.current || chatIdAtom.get() || `maya_${Date.now()}`
@@ -1036,11 +1099,22 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     // appends the suffix to the last user message in chat/route.ts L175-L192.
     pipelineInstructionsRef.current = hiddenSuffix
 
-    // Send only the bare prompt; chat UI shows just the prompt, server gets
-    // the suffix out-of-band.
+    // Lander-order priming — deferred so we never duplicate the user message.
+    //   trackedSendMessage appends the user message AND kicks off streaming.
+    //   Pre-seeding [user, plan] in the SAME tick caused a duplicate user
+    //   bubble (trackedSendMessage's append rendered next to the synth user).
+    //   The watched-effect below waits for useChat to commit the user msg,
+    //   then injects the plan once after it — preserving the exact order
+    //   [user, plan, build].
+    if (planAssistantMsg) {
+      pendingPlanInjectRef.current = planAssistantMsg
+      // Mark primed so the synthetic-priming effect (Effect 2 below) doesn't
+      // double-seed on top.
+      primedRef.current = appIdRef.current
+    }
     setTimeout(() => {
       trackedSendMessage({ text: visibleText })
-    }, planAssistantMsg ? 400 : 100)
+    }, planAssistantMsg ? 200 : 50)
   }, [searchParams])
 
   // ─── Progress annotations — derived from action runner states ───────────────
@@ -1051,6 +1125,37 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       // Clear progress 1.5s after streaming ends so "complete" checkmarks flash
       const timer = setTimeout(() => setProgressAnnotations([]), 1500)
       return () => clearTimeout(timer)
+    }
+
+    // ── Deferred plan-inject watcher ─────────────────────────────────────
+    // The URL-?prompt= effect above stashes planAssistantMsg here and then
+    // kicks off trackedSendMessage. By the time useChat commits the user
+    // message to its hook state this effect fires (deps on messages.length)
+    // and we splice planAssistantMsg in EXACTLY once — after the user, before
+    // any streamed assistant chunks. Idempotent via the .id existence check.
+    if (
+      pendingPlanInjectRef.current &&
+      !injectedPlanIdRef.current &&
+      messages.length > 0 &&
+      messages[messages.length - 1]?.role === 'user'
+    ) {
+      const planToInject = pendingPlanInjectRef.current
+      if (!messages.some((m) => m.id === planToInject.id)) {
+        injectedPlanIdRef.current = planToInject.id
+        setMessages((prev) => {
+          const lastUserIdx = prev.map((m) => m.role).lastIndexOf('user')
+          if (lastUserIdx < 0) return prev
+          return [
+            ...prev.slice(0, lastUserIdx + 1),
+            planToInject,
+            ...prev.slice(lastUserIdx + 1),
+          ]
+        })
+      } else {
+        // Already present (useChat merged it) — flip the gate so we don't retry
+        injectedPlanIdRef.current = planToInject.id
+      }
+      pendingPlanInjectRef.current = null
     }
 
     // Poll action runner states while streaming (action status changes don't
@@ -1310,9 +1415,21 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   // assistant message — never again the assistant plan rendering above the
   // user's still-pending prompt.
   const primedRef = useRef<string | null>(null)
+  // URL-?prompt= plan-inject coordination (see the deferred-inject effect
+  // above and the Effect 1 in the auto-prompt path).
+  const pendingPlanInjectRef = useRef<UIMessage | null>(null)
+  const injectedPlanIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!app || !appIdRef.current) return
     if (primedRef.current === appIdRef.current) return
+    // The URL-?prompt= streaming path is owned by the auto-prompt effect
+    // (~line 904, which sets promptHandledRef synchronously). Bail here to
+    // avoid double-seeding a synthetic [user, plan] on top of that path,
+    // which would duplicate the user bubble and stack two plan messages.
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('prompt')) {
+      primedRef.current = appIdRef.current
+      return
+    }
     if (messages.length > 0) {
       primedRef.current = appIdRef.current
       return

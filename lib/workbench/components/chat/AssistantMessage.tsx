@@ -1,4 +1,5 @@
 import { memo, Fragment, useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Markdown } from './Markdown';
 import type { JSONValue } from 'ai';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
@@ -33,6 +34,7 @@ interface AssistantMessageProps {
     | undefined;
   addToolResult: ({ toolCallId, result }: { toolCallId: string; result: any }) => void;
   isStreaming?: boolean;
+  language?: 'hi' | 'en';
 }
 
 function openArtifactInWorkbench(filePath: string) {
@@ -64,35 +66,54 @@ function normalizedFilePath(path: string) {
  * This gives the user visibility into what the model is doing for ALL models,
  * not just reasoning models.
  */
-function deriveStreamStatus(content: string): string {
-  if (!content || content.length === 0) return 'Thinking...';
+type StreamStatusKey =
+  | 'thinking'
+  | 'writing'
+  | 'running'
+  | 'starting'
+  | 'generating'
+  | 'responding'
+  | 'working';
 
-  // Check for artifact actions being written
-  const lastFileMatch = content.match(/<boltAction[^>]*filePath="([^"]+)"[^>]*>(?![\s\S]*<\/boltAction>)/);
-  if (lastFileMatch) {
-    const fileName = lastFileMatch[1].split('/').pop();
-    return `Writing ${fileName}...`;
-  }
+function deriveStreamStatusKey(content: string): StreamStatusKey {
+  if (!content || content.length === 0) return 'thinking';
+  if (content.match(/<boltAction[^>]*filePath="([^"]+)"[^>]*>(?![\s\S]*<\/boltAction>)/)) return 'writing';
+  if (content.match(/<boltAction[^>]*type="shell"[^>]*>(?![\s\S]*<\/boltAction>)/)) return 'running';
+  if (content.match(/<boltAction[^>]*type="start"[^>]*>(?![\s\S]*<\/boltAction>)/)) return 'starting';
+  if (content.includes('<boltArtifact') && !content.includes('</boltArtifact>')) return 'generating';
+  if (content.trim().length > 0 && !content.includes('<boltArtifact')) return 'responding';
+  return 'working';
+}
 
-  // Check for shell commands
-  const lastShellMatch = content.match(/<boltAction[^>]*type="shell"[^>]*>(?![\s\S]*<\/boltAction>)/);
-  if (lastShellMatch) return 'Running command...';
+const STATUS_LABEL: Record<'hi' | 'en', Record<StreamStatusKey, string>> = {
+  en: {
+    thinking: 'Thinking...',
+    writing: 'Writing {file}...',
+    running: 'Running command...',
+    starting: 'Starting app...',
+    generating: 'Generating code...',
+    responding: 'Responding...',
+    working: 'Working...',
+  },
+  hi: {
+    thinking: 'Soch rahi hoon...',
+    writing: '{file} likh rahi hoon...',
+    running: 'Command chala rahi hoon...',
+    starting: 'App shuru kar rahi hoon...',
+    generating: 'Code bana rahi hoon...',
+    responding: 'Jawaab de rahi hoon...',
+    working: 'Kaam kar rahi hoon...',
+  },
+};
 
-  // Check for start action
-  const lastStartMatch = content.match(/<boltAction[^>]*type="start"[^>]*>(?![\s\S]*<\/boltAction>)/);
-  if (lastStartMatch) return 'Starting app...';
+function statusLabel(key: StreamStatusKey, language: 'hi' | 'en', fileName?: string): string {
+  const label = STATUS_LABEL[language][key];
+  return fileName ? label.replace('{file}', fileName) : label;
+}
 
-  // Check if artifact is open (being written to)
-  if (content.includes('<boltArtifact') && !content.includes('</boltArtifact>')) {
-    return 'Generating code...';
-  }
-
-  // Has visible text but no artifact yet
-  if (content.trim().length > 0 && !content.includes('<boltArtifact')) {
-    return 'Responding...';
-  }
-
-  return 'Working...';
+function lastWritingFileName(content: string): string | undefined {
+  const m = content.match(/<boltAction[^>]*filePath="([^"]+)"[^>]*>(?![\s\S]*<\/boltAction>)/);
+  return m ? m[1].split('/').pop() : undefined;
 }
 
 export const AssistantMessage = memo(
@@ -109,6 +130,7 @@ export const AssistantMessage = memo(
     parts,
     addToolResult,
     isStreaming = false,
+    language = 'en',
   }: AssistantMessageProps) => {
     const filteredAnnotations = (annotations?.filter(
       (annotation: JSONValue) =>
@@ -151,8 +173,12 @@ export const AssistantMessage = memo(
       }
     }, [isStreaming]);
 
-    // Derive streaming status for non-reasoning models
-    const streamStatus = isStreaming ? deriveStreamStatus(displayContent) : '';
+    // Derive stable status key, then localize it to the user's chat language.
+    // The 'writing' key also carries the live file name (e.g. "package.json").
+    const streamStatusKey: StreamStatusKey | null = isStreaming ? deriveStreamStatusKey(displayContent) : null;
+    const streamStatus = streamStatusKey
+      ? statusLabel(streamStatusKey, language, streamStatusKey === 'writing' ? lastWritingFileName(displayContent) : undefined)
+      : '';
 
     // Detect if the model is currently in a reasoning/thinking phase
     // (last part in the stream is a reasoning part) — ThoughtBox handles this UI
@@ -163,16 +189,18 @@ export const AssistantMessage = memo(
       <div className="overflow-hidden w-full">
         {/* ─── v0-style: MAYA avatar + content row ─── */}
         <div className="flex gap-3 items-start">
-          {/* MAYA avatar — always visible */}
-          <div
+          {/* MAYA avatar — always visible; spring-breathes while streaming */}
+          <motion.div
             className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5"
             style={{
               background: 'linear-gradient(135deg, #E8601A 0%, #C94E12 100%)',
               boxShadow: isStreaming ? '0 0 10px rgba(232, 96, 26, 0.3)' : 'none',
             }}
+            animate={{ scale: isStreaming ? 1.04 : 1 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 15 }}
           >
             <span className="text-white text-[9px] font-bold tracking-tight">M</span>
-          </div>
+          </motion.div>
 
           {/* Message content area */}
           <div className="flex-1 min-w-0">
@@ -193,7 +221,7 @@ export const AssistantMessage = memo(
             {/* ─── Streaming activity indicator ─── */}
             {/* Only shows when NOT actively reasoning (ThoughtBox handles reasoning state) */}
             {/* Shows status like "Writing file...", "Running command...", "Generating code..." */}
-            {isStreaming && !isActivelyReasoning && streamStatus !== 'Thinking...' && (
+            {isStreaming && !isActivelyReasoning && streamStatusKey !== null && streamStatusKey !== 'thinking' && (
               <div className="flex items-center gap-2 mb-2">
                 <div
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium"
@@ -201,6 +229,7 @@ export const AssistantMessage = memo(
                     background: 'rgba(232, 96, 26, 0.06)',
                     border: '1px solid rgba(232, 96, 26, 0.12)',
                     color: '#E8601A',
+                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
                   }}
                 >
                   {/* Animated pulse dot */}
@@ -251,7 +280,7 @@ export const AssistantMessage = memo(
                     // Only the last reasoning group gets isStreaming=true (shows "Thinking..")
                     const isActiveThinking = isStreaming && gi === lastReasoningIdx;
                     return (
-                      <ThoughtBox key={`thought-${gi}`} isStreaming={isActiveThinking}>
+                      <ThoughtBox key={`thought-${gi}`} isStreaming={isActiveThinking} language={language}>
                         {reasoningText}
                       </ThoughtBox>
                     );
@@ -308,7 +337,7 @@ export const AssistantMessage = memo(
               <>
                 {/* Fallback: legacy rendering when parts array is empty/missing */}
                 {hasReasoning && (
-                  <ThoughtBox isStreaming={isStreaming}>
+                  <ThoughtBox isStreaming={isStreaming} language={language}>
                     {reasoningParts!.map((part, i) => (
                       <Fragment key={i}>{part.text}</Fragment>
                     ))}
@@ -343,7 +372,7 @@ export const AssistantMessage = memo(
                     className="inline-block w-[3px] h-[14px] ml-0.5 rounded-sm"
                     style={{
                       background: '#E8601A',
-                      animation: 'blink 1s steps(2) infinite',
+                      animation: 'maya-blink 0.8s cubic-bezier(0.32, 0.72, 0, 1) infinite',
                       verticalAlign: 'text-bottom',
                     }}
                   />
@@ -362,7 +391,9 @@ export const AssistantMessage = memo(
                 }}
               >
                 <div className="i-ph:warning-circle w-3.5 h-3.5 shrink-0" />
-                <span>Model returned an empty response. Try sending the message again or switch to a different model.</span>
+                <span>{language === 'hi'
+                  ? 'MAYA ne khaali jawaab diya. Dobara bhejiye ya doosra model try karein.'
+                  : 'Model returned an empty response. Try sending the message again or switch to a different model.'}</span>
               </div>
             )}
           </div>
@@ -373,6 +404,11 @@ export const AssistantMessage = memo(
           @keyframes blink {
             0% { opacity: 1; }
             50% { opacity: 0; }
+            100% { opacity: 1; }
+          }
+          @keyframes maya-blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.2; }
             100% { opacity: 1; }
           }
           @keyframes pulse {

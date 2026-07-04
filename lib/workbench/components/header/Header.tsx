@@ -21,7 +21,7 @@ export function Header() {
       </div>
 
       {/* Center: Chat description / title */}
-      <span className="flex-1 px-4 truncate text-center text-[13px] text-[#9E9890]" style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}>
+      <span className="flex-1 min-w-0 px-4 truncate text-center text-[13px] text-[#9E9890]" style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}>
         <ClientOnly>{() => <ChatDescription />}</ClientOnly>
       </span>
 
