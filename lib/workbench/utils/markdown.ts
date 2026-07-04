@@ -43,11 +43,34 @@ export function remarkPlugins(limitedMarkdown: boolean) {
   return plugins;
 }
 
+// Defense-in-depth: drop any raw `boltArtifact`/`boltAction` element nodes
+// that survive the streaming parser (e.g. model emits XML inside a fenced code
+// block, or an unclosed tag reaches ReactMarkdown). The legit
+// `<div class="__boltArtifact__">` placeholder the streaming parser emits is
+// a `div` node — untouched here. Runs AFTER rehypeRaw so the bolt tags are
+// already parsed into hast element nodes we can remove.
+function rehypeStripBoltTags() {
+  return (tree: any) => {
+    const { visit } = require('unist-util-visit');
+    visit(tree, (node: any, index: number | null, parent: any) => {
+      if (index == null || !parent || !node.tagName) return;
+      const tag = String(node.tagName).toLowerCase();
+      if (tag === 'boltartifact' || tag === 'boltaction') {
+        // Remove the node entirely — never let raw bolt XML render as visible text.
+        parent.children.splice(index, 1);
+        return [undefined, index] as const; // re-visit this index (now the next node)
+      }
+    });
+  };
+}
+
 export function rehypePlugins(html: boolean) {
   const plugins: PluggableList = [];
 
   if (html) {
     plugins.push(rehypeRaw);
+    // Strip stray bolt XML AFTER rehypeRaw parses HTML into hast nodes.
+    plugins.push(rehypeStripBoltTags as Plugin);
   }
 
   return plugins;

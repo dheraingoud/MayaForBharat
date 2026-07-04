@@ -133,6 +133,18 @@ function stripMetadata(content: string) {
   // re-prompting with raw XML, but a model could still emit a stray tag.
   const actionRegex = /<boltAction\s+[^>]*>[\s\S]*?<\/boltAction>/gm;
   const selfClosingActionRegex = /<boltAction\s+[^>]*\/>/gm;
+  // Truncation guard: a streaming/auto-fix tag may arrive WITHOUT its closing
+  // counterpart (e.g. the model was cut mid-emit). Run AFTER the paired
+  // regexes so complete artifacts die first, then any leftover opening-only
+  // tags are stripped — never reaching the bubble as raw visible XML.
+  const openArtifactRegex = /<boltArtifact\s+[^>]*>/gm;
+  const openActionRegex = /<boltAction\s+[^>]*>/gm;
+  const selfClosingArtifactRegex = /<boltArtifact\s+[^>]*\/>/gm;
+  // Strip the auto-fix breadcrumb preamble if it ever leaks into a user msg
+  // ("*Auto-fix attempt 1/15 — Fix this terminal error*").
+  const autoFixPreambleRegex = /\*Auto-fix attempt\s+\d+\/\d+[^*]*\*/g;
+  // Strip ANSI color escapes that WebContainer terminal dumps can carry.
+  const ansiRegex = /\x1b\[[0-9;]*[A-Za-z]/g;
   const planContextRegex = /\n*---\s*APP PLAN.*?---\s*END PLAN\s*---.*?architecture\./gs;
   // Strip the hidden mandatory-pipeline instruction block if it ever leaks
   const pipelineRegex = /\n*---\s*MANDATORY BUILD PIPELINE.*?(?:render correctly\.)\n*/gs;
@@ -141,7 +153,12 @@ function stripMetadata(content: string) {
     .replace(PROVIDER_REGEX, '')
     .replace(artifactRegex, '')
     .replace(actionRegex, '')
+    .replace(selfClosingArtifactRegex, '')
     .replace(selfClosingActionRegex, '')
+    .replace(openArtifactRegex, '')
+    .replace(openActionRegex, '')
+    .replace(autoFixPreambleRegex, '')
+    .replace(ansiRegex, '')
     .replace(planContextRegex, '')
     .replace(pipelineRegex, '')
     .replace(/\n{3,}/g, '\n\n')

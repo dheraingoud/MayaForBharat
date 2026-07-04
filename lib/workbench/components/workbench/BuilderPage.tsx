@@ -23,6 +23,7 @@ import {
   Mic, Plus, Globe, Paperclip, GitBranch, Sparkles,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
+import { CONTINUE_PROMPT } from '@/lib/workbench/prompts/prompts'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -250,6 +251,12 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   // — cleared after each send so retries that re-read `retryRef.current.lastUserMsg`
   // don't double-inject the same suffix. The chat UI never sees this content.
   const pipelineInstructionsRef = useRef<string>('')
+  // Phase C: auto-continue counter for `finishReason==='length'` truncation.
+  // Reasoning models burn the token budget inside <reasoning> then cut before
+  // the <boltArtifact> lands. We re-prompt with CONTINUE_PROMPT (hidden, same
+  // path as auto-fix) up to this cap so the artifact streams on the next turn.
+  const continueAttemptRef = useRef<number>(0)
+  const CONTINUE_MAX = 3
   transportBodyRef.current = () => ({
     apiKeys,
     files: filesRef.current,
@@ -346,13 +353,43 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         )
       }
     },
-    onFinish: ({ message }) => {
+    onFinish: ({ message, finishReason }) => {
       retryRef.current.count = 0 // Reset retry counter on success
       logger.debug('Finished streaming')
       logStore.logProvider('Chat response completed', {
         component: 'Chat', action: 'response', model, provider: provider.name,
         messageLength: message ? extractMessageText(message).length : 0,
       })
+
+      // ─── Phase C: auto-continue on token cap ────────────────────────────────
+      // finishReason==='length' means the model hit maxOutputTokens mid-emit
+      // (reasoning models do this inside <reasoning>, so <boltArtifact> never
+      // lands → "generation not happening"). Re-prompt with CONTINUE_PROMPT via
+      // the SAME hidden pipeline path as auto-fix: user sees a clean bilingual
+      // breadcrumb, the model sees the continue directive server-side. Cap at
+      // CONTINUE_MAX to bound runaway. Reset the counter on any non-length finish.
+      if (finishReason !== 'length') {
+        continueAttemptRef.current = 0
+        return
+      }
+      if (continueAttemptRef.current >= CONTINUE_MAX) {
+        logger.warn(`[Chat] Continuation cap reached (${CONTINUE_MAX}) — surfacing as fallback`)
+        toast.warning('MAYA hit the token limit; continuing in the next message.', {
+          autoClose: 4000, toastId: 'continue-cap',
+        })
+        continueAttemptRef.current = 0
+        return
+      }
+      continueAttemptRef.current += 1
+      const attempt = continueAttemptRef.current
+      logger.info(`[Chat] Continuing after length (attempt ${attempt}/${CONTINUE_MAX})`)
+      // Hidden injection: breadcrumb visible to user, CONTINUE_PROMPT → model only.
+      pipelineInstructionsRef.current = `\n\n${CONTINUE_PROMPT}`
+      // Defer so the stream fully closes before we kick the next one.
+      setTimeout(() => {
+        trackedSendMessage({ text: `MAYA is continuing the build (attempt ${attempt}/${CONTINUE_MAX})…` })
+        setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
+      }, 400)
     },
   })
 
@@ -652,7 +689,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
   // ─── Auto-fix loop: subscribe to autoFixAlert and auto-send fix messages ──
   const autoFixDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingAutoFixRef = useRef<string | null>(null) // Queue fix message if streaming
+  const pendingAutoFixRef = useRef<{ breadcrumb: string; hidden: string } | null>(null) // Queue fix message if streaming
 
   useEffect(() => {
     const unsubscribe = workbenchStore.autoFixAlert.subscribe((alertData) => {
@@ -671,18 +708,40 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       const errorSnippet = error.length > 2000 ? error.slice(-2000) : error
 
       logger.info(`[AutoFix] ${sourceLabel} error — attempt ${attempt}/${maxAttempts}`)
-      toast.info(`🔧 Auto-fixing ${sourceLabel.toLowerCase()} error (${attempt}/${maxAttempts})...`, {
+      toast.info(`Auto-fixing ${sourceLabel.toLowerCase()} error (${attempt}/${maxAttempts})...`, {
         autoClose: 3000,
         toastId: 'auto-fix-progress',
       })
 
-      // Simplified auto-fix: fix → install → build → test → start dev
-      // The FULL pipeline always runs — no skipped steps.
-      const fixMessage = source === 'preview'
-        ? `*Auto-fix attempt ${attempt}/${maxAttempts} — Fix this preview error*\n\n\`\`\`\n${errorSnippet}\n\`\`\`\n\nAnalyze the error above and fix ALL related source files. After fixing, ALWAYS include the FULL pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="shell">npm run build</boltAction>\`\n3. \`<boltAction type="shell">npx vitest run --reporter=verbose 2>&amp;1 || true</boltAction>\`\n4. \`<boltAction type="start">npm run dev</boltAction>\`\n\nIMPORTANT: Reduce ALL errors to zero. Do NOT explain — just output the boltArtifact with fixes.`
-        : `*Auto-fix attempt ${attempt}/${maxAttempts} — Fix this terminal error*\n\nFailed command: \`${command}\`\n\n\`\`\`sh\n${errorSnippet}\n\`\`\`\n\nAnalyze the error output and fix ALL affected code. After fixing, ALWAYS include the FULL pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="shell">npm run build</boltAction>\`\n3. \`<boltAction type="shell">npx vitest run --reporter=verbose 2>&amp;1 || true</boltAction>\`\n4. \`<boltAction type="start">npm run dev</boltAction>\`\n\nIMPORTANT: Reduce ALL errors to zero. Do NOT explain — just output the boltArtifact with fixes.`
+      // ─── HIDDEN AUTO-FIX INJECTION (no internals leak) ──────────────────────
+      // User sees ONLY a clean bilingual status breadcrumb. The real error
+      // context + fix directive rides on `pipelineInstructionsRef` → the server
+      // appends it to the LLM-bound user message (chat/route.ts L178-192) and
+      // it NEVER renders in the chat UI. No raw `<boltAction>` XML, no terminal
+      // dump, no "just output the boltArtifact" wording (that caused the model
+      // to emit raw XML as visible text). The model uses its standard bolt
+      // action protocol (already taught by the system prompt) so the streaming
+      // parser consumes artifacts/actions normally.
+      const visibleBreadcrumb = source === 'preview'
+        ? `MAYA is fixing a preview error (attempt ${attempt}/${maxAttempts})…`
+        : `MAYA is fixing a ${sourceLabel.toLowerCase()} error (attempt ${attempt}/${maxAttempts})…`
 
-      const messageText = `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${fixMessage}`
+      const hiddenAutoFixInstruction = [
+        `[Model: ${model}]`,
+        `[Provider: ${provider.name}]`,
+        '',
+        source === 'preview'
+          ? `A preview runtime error occurred (attempt ${attempt}/${maxAttempts}). Error detail:\n\n\`\`\`\n${errorSnippet}\n\`\`\``
+          : `The command \`${command}\` failed (attempt ${attempt}/${maxAttempts}). Terminal output:\n\n\`\`\`sh\n${errorSnippet}\n\`\`\``,
+        '',
+        'Fix the underlying source files causing this error, then re-emit the artifact using your standard bolt action format so the changes apply. After fixing, include the full pipeline:',
+        '1. install dependencies',
+        '2. build the project',
+        '3. run tests (non-blocking)',
+        '4. start the dev server',
+        'Reduce all errors to zero. Do not explain — emit the artifact directly.',
+      ].join('\n')
+
 
       // Delay to let current action finish processing — use nanostore to avoid stale closure
       autoFixDebounceRef.current = setTimeout(() => {
@@ -690,11 +749,16 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         if (streamingState.get()) {
           // Don't silently drop — queue it for when streaming ends
           logger.warn('[AutoFix] Queuing — still streaming, will send when done')
-          pendingAutoFixRef.current = messageText
+          pendingAutoFixRef.current = { breadcrumb: visibleBreadcrumb, hidden: hiddenAutoFixInstruction }
           return
         }
         pendingAutoFixRef.current = null
-        trackedSendMessage({ text: messageText })
+        // Hide the real error context server-side; user sees only the breadcrumb.
+        pipelineInstructionsRef.current = hiddenAutoFixInstruction
+        trackedSendMessage({ text: visibleBreadcrumb })
+        // Clear the one-shot hidden suffix on the next tick so a later
+        // user-typed message does not accidentally carry the auto-fix context.
+        setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
       }, 800)
     })
 
@@ -715,7 +779,10 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       // Small delay to let post-streaming processing settle
       setTimeout(() => {
         if (!streamingState.get()) {
-          trackedSendMessage({ text: msg })
+          // Hidden injection: breadcrumb visible, real error context server-side.
+          pipelineInstructionsRef.current = msg.hidden
+          trackedSendMessage({ text: msg.breadcrumb })
+          setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
         }
       }, 500)
     }
