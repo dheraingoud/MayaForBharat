@@ -144,6 +144,33 @@
   --color-accent-500: #E8601A;
   --color-accent-600: #C94E12;
   --color-accent-700: #A5400E;
+
+  /* ─── Vercel-chatbot semantic tokens → MAYA dark/orange ────
+     Generates bg-background/text-foreground/bg-primary/bg-card/
+     bg-secondary/bg-muted/bg-accent/bg-destructive/text-muted-foreground/
+     border-border/bg-input/ring-ring utilities. Dark-only this pass. */
+  --color-background: #111110;
+  --color-foreground: #F5F4F0;
+  --color-card: #1A1917;
+  --color-card-foreground: #F5F4F0;
+  --color-secondary: #222120;
+  --color-secondary-foreground: #F5F4F0;
+  --color-muted: #1A1917;
+  --color-muted-foreground: #6B6560;
+  --color-primary: #E8601A;
+  --color-primary-foreground: #F5F4F0;
+  --color-accent-foreground: #F5F4F0;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-input: #1A1917;
+  --color-ring: #E8601A;
+  --color-destructive: #F87171;
+  --color-destructive-foreground: #F5F4F0;
+
+  /* ─── Vercel composer/card shadows (MAYA-tuned) ─────────── */
+  --shadow-composer: 0 1px 3px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-composer-focus: 0 0 0 1px rgba(232, 96, 26, 0.1), 0 4px 16px -4px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 16px 48px -6px rgba(0, 0, 0, 0.35);
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 @layer base {

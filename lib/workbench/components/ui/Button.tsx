@@ -3,24 +3,28 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { classNames } from '@/lib/workbench/utils/classNames';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-bolt-elements-borderColor disabled:pointer-events-none disabled:opacity-50',
+  'group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
   {
     variants: {
       variant: {
-        default: 'bg-bolt-elements-background text-bolt-elements-textPrimary hover:bg-bolt-elements-background-depth-2',
-        destructive: 'bg-red-500 text-white hover:bg-red-600',
+        default: 'bg-[#E8601A] text-[#F5F4F0] hover:bg-[#E8601A]/85',
+        destructive: 'bg-[#F87171]/10 text-[#F87171] hover:bg-[#F87171]/20',
         outline:
-          'border border-bolt-elements-borderColor bg-transparent hover:bg-bolt-elements-background-depth-2 hover:text-bolt-elements-textPrimary text-bolt-elements-textPrimary dark:border-bolt-elements-borderColorActive',
+          'border border-white/[0.06] bg-[#1A1917]/50 hover:bg-white/[0.04] hover:text-[#F5F4F0] text-[#D4D0CA]',
         secondary:
-          'bg-bolt-elements-background-depth-1 text-bolt-elements-textPrimary hover:bg-bolt-elements-background-depth-2',
-        ghost: 'hover:bg-bolt-elements-background-depth-1 hover:text-bolt-elements-textPrimary',
-        link: 'text-bolt-elements-textPrimary underline-offset-4 hover:underline',
+          'bg-[#222120] text-[#F5F4F0] hover:bg-[#222120]/80',
+        ghost: 'hover:bg-white/[0.04] hover:text-[#F5F4F0] text-[#D4D0CA]',
+        link: 'text-[#E8601A] underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-9 px-4 py-2',
-        sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-10 rounded-md px-8',
-        icon: 'h-9 w-9',
+        default: 'h-9 gap-1.5 px-3',
+        xs: 'h-6 gap-1 px-2.5 text-xs [&_svg:not([class*=size-])]:size-3',
+        sm: 'h-8 gap-1 px-3',
+        lg: 'h-10 gap-1.5 px-4',
+        icon: 'size-9',
+        'icon-xs': 'size-6 [&_svg:not([class*=size-])]:size-3',
+        'icon-sm': 'size-8',
+        'icon-lg': 'size-10',
       },
     },
     defaultVariants: {
