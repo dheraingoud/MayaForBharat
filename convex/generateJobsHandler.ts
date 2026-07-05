@@ -96,9 +96,18 @@ export async function generateJobsHandler(
   let parsedFiles: Array<{ path: string; content: string }> = [];
   let didMark = false;
 
+  // Gap A fix: abort the in-flight streamText fetch on cancel so the NIM SSE
+  // connection dies immediately. Without this, cancel was polling-only (7s in
+  // onChunk) — the stream kept flowing + burning tokens until the 2min stale
+  // sweeper caught it. abort() is idempotent; throw Cancelled so the catch arm
+  // marks the row 'cancelled' (not 'error').
+  const abortController = new AbortController();
   const checkCancel = async () => {
     const fresh = await ctx.runQuery(internal.generateJobs._get, { jobId });
-    if (fresh?.status === 'cancelled') throw new Cancelled();
+    if (fresh?.status === 'cancelled') {
+      abortController.abort();
+      throw new Cancelled();
+    }
   };
 
   const saveProgressNow = async (note: string) => {
@@ -109,7 +118,15 @@ export async function generateJobsHandler(
     });
   };
 
+  // Poll cancel on a timer INDEPENDENT of onChunk so a mid-thinking gap (no
+  // chunks flowing) is still caught within CANCEL_CHECK_INTERVAL_MS. The
+  // swallow-catch lets the abort() do the actual work (stream errors with
+  // AbortError → outer catch). Cleared in finally.
+  let cancelInterval: ReturnType<typeof setInterval> | undefined;
   try {
+    cancelInterval = setInterval(() => {
+      void checkCancel().catch(() => {});
+    }, CANCEL_CHECK_INTERVAL_MS);
     await streamText({
       messages: [
         {
@@ -126,6 +143,10 @@ export async function generateJobsHandler(
       designScheme: undefined,
       files: {},
       options: {
+        // Gap A: kill the NIM SSE fetch on cancel. stream-text.ts passes
+        // options.* through to _streamText (abortSignal is NOT in its
+        // RESERVED_KEYS L238-242), so this reaches AI SDK v6's streamText.
+        abortSignal: abortController.signal,
         // AI SDK v6: chunk events. We persist text-delta only; reasoning/tool
         // deltas are intentionally skipped from partialText (those go through
         // a separate UI channel).
@@ -224,7 +245,7 @@ export async function generateJobsHandler(
     }
     return { ok: true, files: parsedFiles.length };
   } catch (e: any) {
-    if (e instanceof Cancelled || e?.__cancelled) {
+    if (e instanceof Cancelled || e?.__cancelled || e?.name === 'AbortError') {
       await ctx.runMutation(internal.generateJobs.markError, {
         jobId,
         error: 'cancelled',
@@ -239,6 +260,8 @@ export async function generateJobsHandler(
           : String(e?.message ?? e),
     });
     return { ok: false };
+  } finally {
+    if (cancelInterval) clearInterval(cancelInterval);
   }
 }
 
