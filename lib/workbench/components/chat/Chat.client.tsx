@@ -217,7 +217,11 @@ export const ChatImpl = memo(
     }, [searchParams]);
 
     const { enhancingPrompt, promptEnhanced, enhancePrompt, resetEnhancer } = usePromptEnhancer();
-    const { parsedMessages, parseMessages } = useMessageParser();
+    // M1: parseMessages still drives the StreamingMessageParser side effects
+    // (workbenchStore.addArtifact/addAction/runAction → in-browser file writes),
+    // but its parsed map no longer gates chat render — AssistantMessage now
+    // renders raw message parts via Streamdown for true progressive streaming.
+    const { parseMessages } = useMessageParser();
 
     const TEXTAREA_MAX_HEIGHT = 400;
 
@@ -624,19 +628,11 @@ export const ChatImpl = memo(
         description={description}
         importChat={importChat}
         exportChat={exportChat}
-        messages={messages.map((message, i) => {
-          if (message.role === 'user') {
-            return message;
-          }
-
-          const parsed = parsedMessages[i] || '';
-
-          return {
-            ...message,
-            content: parsed,
-            parts: [{ type: 'text' as const, text: parsed }],
-          };
-        })}
+        // M1: pass raw messages — AssistantMessage renders real `message.parts`
+        // (reasoning/text/tool interleaved) via Streamdown for progressive render.
+        // The 50ms-sampled parsed map no longer overrides content/parts; the
+        // parser still runs (above) purely for workbenchStore file-write side effects.
+        messages={messages}
         enhancePrompt={() => {
           enhancePrompt(
             input,

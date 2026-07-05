@@ -1,9 +1,8 @@
-// Source: bolt.diy/app/utils/markdown.ts
-// Ported: removed rehype-sanitize (different version), simplified for Next.js
-
-import rehypeRaw from 'rehype-raw';
-import remarkGfm from 'remark-gfm';
-import type { PluggableList, Plugin } from 'unified';
+// Source: bolt.diy/app/utils/markdown.ts — stripped to allowedHTMLElements only.
+// Chat markdown is now rendered by Streamdown (see chat/Markdown.tsx); the
+// remark/rehype plugin functions + the rehype-raw dependency were removed in M1.
+// `allowedHTMLElements` remains because prompt/LLM utils (prompts.ts,
+// new-prompt.ts, stream-text.ts) still import it to constrain model output.
 
 export const allowedHTMLElements = [
   'a', 'b', 'button', 'blockquote', 'br', 'code', 'dd', 'del', 'details', 'div',
@@ -12,96 +11,3 @@ export const allowedHTMLElements = [
   'source', 'span', 'strike', 'strong', 'sub', 'summary', 'sup', 'table',
   'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul', 'var', 'think', 'header',
 ];
-
-// Custom remark plugin to handle <think> tags from reasoning models
-function remarkThinkRawContent() {
-  return (tree: any) => {
-    const { visit } = require('unist-util-visit');
-    visit(tree, (node: any) => {
-      if (node.type === 'html' && node.value && node.value.startsWith('<think>')) {
-        const cleanedContent = node.value.slice(7);
-        node.value = `<div class="__boltThought__">${cleanedContent}`;
-        return;
-      }
-      if (node.type === 'html' && node.value && node.value.startsWith('</think>')) {
-        const cleanedContent = node.value.slice(8);
-        node.value = `</div>${cleanedContent}`;
-      }
-    });
-  };
-}
-
-export function remarkPlugins(limitedMarkdown: boolean) {
-  const plugins: PluggableList = [remarkGfm];
-
-  if (limitedMarkdown) {
-    plugins.unshift(limitedMarkdownPlugin);
-  }
-
-  plugins.unshift(remarkThinkRawContent);
-
-  return plugins;
-}
-
-// Defense-in-depth: drop any raw `boltArtifact`/`boltAction` element nodes
-// that survive the streaming parser (e.g. model emits XML inside a fenced code
-// block, or an unclosed tag reaches ReactMarkdown). The legit
-// `<div class="__boltArtifact__">` placeholder the streaming parser emits is
-// a `div` node — untouched here. Runs AFTER rehypeRaw so the bolt tags are
-// already parsed into hast element nodes we can remove.
-function rehypeStripBoltTags() {
-  return (tree: any) => {
-    const { visit } = require('unist-util-visit');
-    visit(tree, (node: any, index: number | null, parent: any) => {
-      if (index == null || !parent || !node.tagName) return;
-      const tag = String(node.tagName).toLowerCase();
-      if (tag === 'boltartifact' || tag === 'boltaction') {
-        // Remove the node entirely — never let raw bolt XML render as visible text.
-        parent.children.splice(index, 1);
-        return [undefined, index] as const; // re-visit this index (now the next node)
-      }
-    });
-  };
-}
-
-export function rehypePlugins(html: boolean) {
-  const plugins: PluggableList = [];
-
-  if (html) {
-    plugins.push(rehypeRaw);
-    // Strip stray bolt XML AFTER rehypeRaw parses HTML into hast nodes.
-    plugins.push(rehypeStripBoltTags as Plugin);
-  }
-
-  return plugins;
-}
-
-const limitedMarkdownPlugin: Plugin = () => {
-  return (tree: any, file: any) => {
-    const { visit, SKIP } = require('unist-util-visit');
-    const contents = file.toString();
-
-    visit(tree, (node: any, index: number | null, parent: any) => {
-      if (
-        index == null ||
-        ['paragraph', 'text', 'inlineCode', 'code', 'strong', 'emphasis'].includes(node.type) ||
-        !node.position
-      ) {
-        return true;
-      }
-
-      let value = contents.slice(node.position.start.offset, node.position.end.offset);
-
-      if (node.type === 'heading') {
-        value = `\n${value}`;
-      }
-
-      parent.children[index] = {
-        type: 'text',
-        value,
-      } as any;
-
-      return [SKIP, index] as const;
-    });
-  };
-};

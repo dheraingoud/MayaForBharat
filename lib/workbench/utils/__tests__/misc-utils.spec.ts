@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { debounce } from '@/lib/workbench/utils/debounce'
 import { createSampler } from '@/lib/workbench/utils/sampler'
 import { unreachable } from '@/lib/workbench/utils/unreachable'
-import { allowedHTMLElements, remarkPlugins, rehypePlugins } from '@/lib/workbench/utils/markdown'
+import { allowedHTMLElements } from '@/lib/workbench/utils/markdown'
 
 // ─── debounce ────────────────────────────────────────────────────────────────
 
@@ -134,32 +134,5 @@ describe('allowedHTMLElements', () => {
     expect(allowedHTMLElements).not.toContain('script')
     expect(allowedHTMLElements).not.toContain('iframe')
     expect(allowedHTMLElements).not.toContain('style')
-  })
-})
-
-describe('remarkPlugins', () => {
-  it('always includes remarkGfm', () => {
-    const plugins = remarkPlugins(false)
-    expect(plugins.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('adds limitedMarkdown plugin when limited=true', () => {
-    const limited = remarkPlugins(true)
-    const normal = remarkPlugins(false)
-    expect(limited.length).toBeGreaterThan(normal.length)
-  })
-})
-
-describe('rehypePlugins', () => {
-  it('includes rehypeRaw + rehypeStripBoltTags when html=true', () => {
-    // D3 hardening: rehypeStripBoltTags runs AFTER rehypeRaw so stray bolt XML
-    // never renders as visible text. Two plugins, not one.
-    const plugins = rehypePlugins(true)
-    expect(plugins.length).toBe(2)
-  })
-
-  it('returns empty array when html=false', () => {
-    const plugins = rehypePlugins(false)
-    expect(plugins).toEqual([])
   })
 })

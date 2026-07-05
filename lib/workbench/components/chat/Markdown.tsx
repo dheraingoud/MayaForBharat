@@ -1,213 +1,60 @@
 // @ts-nocheck
-import { memo, useMemo } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import type { BundledLanguage } from 'shiki';
-import { createScopedLogger } from '@/lib/workbench/utils/logger';
-import { rehypePlugins, remarkPlugins, allowedHTMLElements } from '@/lib/workbench/utils/markdown';
-import { Artifact, openArtifactInWorkbench } from './Artifact';
-import { CodeBlock } from './CodeBlock';
-import type { UIMessage } from 'ai';
+import { memo } from 'react';
+import { Streamdown } from 'streamdown';
+import { cjk } from '@streamdown/cjk';
+import { code } from '@streamdown/code';
+import { math } from '@streamdown/math';
+import { mermaid } from '@streamdown/mermaid';
 import styles from './Markdown.module.scss';
-import ThoughtBox from './ThoughtBox';
-import type { ProviderInfo } from '@/lib/workbench/types/model';
 
-const logger = createScopedLogger('MarkdownComponent');
+const streamdownPlugins = { cjk, code, math, mermaid };
 
 interface MarkdownProps {
   children: string;
-  html?: boolean;
-  limitedMarkdown?: boolean;
-  append?: (UIMessage: UIMessage) => void;
-  chatMode?: 'discuss' | 'build';
-  setChatMode?: (mode: 'discuss' | 'build') => void;
-  model?: string;
-  provider?: ProviderInfo;
   isStreaming?: boolean;
 }
 
+/**
+ * Discards <boltArtifact>/<boltAction> XML from assistant prose so the chat
+ * UI renders pure markdown. MAYA's real generation engine is the detached
+ * Convex generateJobsHandler + extractBoltFiles (writes apps.fileTree →
+ * mounts BuilderPage, survives browser close); bolt XML in the chat stream is
+ * a cosmetic echo of the route.ts text and must NOT render as cards or raw
+ * tags here. Handles complete, self-closing, mid-stream-unclosed, and
+ * orphan-close forms.
+ */
+export const stripBoltXml = (input: string) => {
+  if (!input) return input;
+  let out = input;
+  // Complete artifact (swallows nested boltAction content)
+  out = out.replace(/<boltArtifact\b[\s\S]*?<\/boltArtifact>/gi, '');
+  // Orphan boltAction outside an artifact
+  out = out.replace(/<boltAction\b[\s\S]*?<\/boltAction>/gi, '');
+  // Self-closing
+  out = out.replace(/<bolt(?:Artifact|Action)\b[^>]*\/>/gi, '');
+  // Mid-stream unclosed (block still streaming): drop open tag + rest
+  out = out.replace(/<bolt(?:Artifact|Action)\b[\s\S]*$/gi, '');
+  // Orphan close tags
+  out = out.replace(/<\/bolt(?:Artifact|Action)>/gi, '');
+  return out;
+};
+
 export const Markdown = memo(
-  ({ children, html = false, limitedMarkdown = false, append, setChatMode, model, provider, isStreaming = false }: MarkdownProps) => {
-    logger.trace('Render');
-
-    const components = useMemo(() => {
-      return {
-        div: ({ className, children, node, ...props }) => {
-          const dataProps = node?.properties as Record<string, unknown>;
-
-          if (className?.includes('__boltArtifact__')) {
-            const messageId = node?.properties.dataMessageId as string;
-            const artifactId = node?.properties.dataArtifactId as string;
-
-            if (!messageId) {
-              logger.error(`Invalid UIMessage id ${messageId}`);
-            }
-
-            if (!artifactId) {
-              logger.error(`Invalid artifact id ${artifactId}`);
-            }
-
-            return <Artifact messageId={messageId} artifactId={artifactId} />;
-          }
-
-          if (className?.includes('__boltSelectedElement__')) {
-            const messageId = node?.properties.dataMessageId as string;
-            const elementDataAttr = node?.properties.dataElement as string;
-
-            // Parse the element data if it exists
-            let elementData: any = null;
-
-            if (elementDataAttr) {
-              try {
-                elementData = JSON.parse(elementDataAttr);
-              } catch (e) {
-                console.error('Failed to parse element data:', e);
-              }
-            }
-
-            if (!messageId) {
-              logger.error(`Invalid UIMessage id ${messageId}`);
-            }
-
-            return (
-              <div className="bg-bolt-elements-background-depth-3 border border-bolt-elements-borderColor rounded-lg p-3 my-2">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-mono bg-bolt-elements-background-depth-2 px-2 py-1 rounded text-bolt-elements-textTer">
-                    {elementData?.tagName}
-                  </span>
-                  {elementData?.className && (
-                    <span className="text-xs text-bolt-elements-textSecondary">.{elementData.className}</span>
-                  )}
-                </div>
-                <code className="block text-sm !text-bolt-elements-textSecondary !bg-bolt-elements-background-depth-2 border border-bolt-elements-borderColor p-2 rounded">
-                  {elementData?.displayText}
-                </code>
-              </div>
-            );
-          }
-
-          if (className?.includes('__boltThought__')) {
-            return <ThoughtBox title="Thought process" isStreaming={isStreaming}>{children}</ThoughtBox>;
-          }
-
-          if (className?.includes('__boltQuickAction__') || dataProps?.dataBoltQuickAction) {
-            return <div className="flex items-center gap-2 flex-wrap mt-3.5">{children}</div>;
-          }
-
-          return (
-            <div className={className} {...props}>
-              {children}
-            </div>
-          );
-        },
-        pre: (props) => {
-          const { children, node, ...rest } = props;
-
-          const [firstChild] = node?.children ?? [];
-
-          if (
-            firstChild &&
-            firstChild.type === 'element' &&
-            firstChild.tagName === 'code' &&
-            firstChild.children[0].type === 'text'
-          ) {
-            const { className, ...rest } = firstChild.properties;
-            const [, language = 'plaintext'] = /language-(\w+)/.exec(String(className) || '') ?? [];
-
-            return <CodeBlock code={firstChild.children[0].value} language={language as BundledLanguage} {...rest} />;
-          }
-
-          return <pre {...rest}>{children}</pre>;
-        },
-        button: ({ node, children, ...props }) => {
-          const dataProps = node?.properties as Record<string, unknown>;
-
-          if (
-            dataProps?.class?.toString().includes('__boltQuickAction__') ||
-            dataProps?.dataBoltQuickAction === 'true'
-          ) {
-            const type = dataProps['data-type'] || dataProps.dataType;
-            const UIMessage = dataProps['data-UIMessage'] || dataProps.dataMessage;
-            const path = dataProps['data-path'] || dataProps.dataPath;
-            const href = dataProps['data-href'] || dataProps.dataHref;
-
-            const iconClassMap: Record<string, string> = {
-              file: 'i-ph:file',
-              UIMessage: 'i-ph:chats',
-              implement: 'i-ph:code',
-              link: 'i-ph:link',
-            };
-
-            const safeType = typeof type === 'string' ? type : '';
-            const iconClass = iconClassMap[safeType] ?? 'i-ph:question';
-
-            return (
-              <button
-                className="rounded-md justify-center px-3 py-1.5 text-xs bg-bolt-elements-item-backgroundAccent text-bolt-elements-item-contentAccent opacity-90 hover:opacity-100 flex items-center gap-2 cursor-pointer"
-                data-type={type}
-                data-UIMessage={UIMessage}
-                data-path={path}
-                data-href={href}
-                onClick={() => {
-                  if (type === 'file') {
-                    openArtifactInWorkbench(path);
-                  } else if (type === 'UIMessage' && append) {
-                    append({
-                      id: `quick-action-UIMessage-${Date.now()}`,
-                      content: [
-                        {
-                          type: 'text',
-                          text: `[Model: ${model}]\n\n[Provider: ${provider?.name}]\n\n${UIMessage}`,
-                        },
-                      ] as any,
-                      role: 'user',
-                    });
-                    console.log('UIMessage appended:', UIMessage);
-                  } else if (type === 'implement' && append && setChatMode) {
-                    setChatMode('build');
-                    append({
-                      id: `quick-action-implement-${Date.now()}`,
-                      content: [
-                        {
-                          type: 'text',
-                          text: `[Model: ${model}]\n\n[Provider: ${provider?.name}]\n\n${UIMessage}`,
-                        },
-                      ] as any,
-                      role: 'user',
-                    });
-                  } else if (type === 'link' && typeof href === 'string') {
-                    try {
-                      const url = new URL(href, window.location.origin);
-                      window.open(url.toString(), '_blank', 'noopener,noreferrer');
-                    } catch (error) {
-                      console.error('Invalid URL:', href, error);
-                    }
-                  }
-                }}
-              >
-                <div className={`text-lg ${iconClass}`} />
-                {children}
-              </button>
-            );
-          }
-
-          return <button {...props}>{children}</button>;
-        },
-      } satisfies Components;
-    }, [isStreaming]);
-
-    return (
-      <div className={styles.MarkdownContent}>
-        <ReactMarkdown
-          allowedElements={allowedHTMLElements}
-          components={components}
-          remarkPlugins={remarkPlugins(limitedMarkdown)}
-          rehypePlugins={rehypePlugins(html)}
-        >
-          {stripCodeFenceFromArtifact(children)}
-        </ReactMarkdown>
-      </div>
-    );
-  },
+  ({ children, isStreaming = false }: MarkdownProps) => (
+    <Streamdown
+      className={styles.MarkdownContent}
+      mode={isStreaming ? 'streaming' : 'static'}
+      plugins={streamdownPlugins}
+      shikiTheme={['github-dark', 'github-dark']}
+    >
+      {stripBoltXml(children)}
+    </Streamdown>
+  ),
+  // Re-render only when prose changes (or streaming state flips) — Streamdown
+  // is internally memoized; with raw parts now feeding the chat the prose IS
+  // the live token-by-token text so this preserves progressive streaming.
+  (prevProps, nextProps) =>
+    prevProps.children === nextProps.children && prevProps.isStreaming === nextProps.isStreaming,
 );
 
 /**

@@ -170,20 +170,15 @@ export const AssistantMessage = memo(
                       .map(p => p.text)
                       .join('');
                     if (!textContent.trim()) return null;
-                    // Check if this is the last text group (for streaming cursor)
+                    // M1: chat now renders the raw text part. The StreamingMessageParser
+                    // still runs (processSampledMessages) for its side effects — feeding
+                    // the in-browser workbenchStore with file actions — but its parsed
+                    // map no longer gates render. Streamdown parses prose token-by-token
+                    // (progressive); stripBoltXml discards <boltArtifact>/<boltAction> so
+                    // build-mode prose renders clean (real files come from the detached
+                    // Convex generateJobsHandler, not the chat stream).
                     const isLastTextGroup = gi === groups.length - 1 ||
                       groups.slice(gi + 1).every(g => g.type !== 'text');
-                    // Render the FIRST text group from the StreamingMessageParser's
-                    // parsed body (displayContent) — the parser converts <boltArtifact>
-                    // XML into <div class="__boltArtifact__"> placeholders, which
-                    // Markdown's div-router (Markdown.tsx:34-50) mounts as <Artifact>
-                    // cards. Rendering raw `parts.text` instead hits rehypeStripBoltTags
-                    // (markdown.ts:52-65) which strips raw bolt hast nodes → no cards.
-                    // Subsequent text groups are skipped: displayContent is the FULL
-                    // parsed message so it already contains their prose. Parser runs on
-                    // a 50ms sampler (useMessageParser), so displayContent is at most
-                    // ~50ms stale — fall back to raw textContent during that gap so
-                    // streaming prose stays live.
                     const isFirstTextGroup = groups.slice(0, gi).every(g => g.type !== 'text');
                     if (!isFirstTextGroup) return null;
                     const renderContent = (displayContent && displayContent.trim().length > 0)
@@ -191,15 +186,7 @@ export const AssistantMessage = memo(
                       : textContent;
                     return (
                       <Fragment key={`text-${gi}`}>
-                        <Markdown
-                          append={append}
-                          chatMode={chatMode}
-                          setChatMode={setChatMode}
-                          model={model}
-                          provider={provider}
-                          isStreaming={isStreaming && isLastTextGroup}
-                          html
-                        >
+                        <Markdown isStreaming={isStreaming && isLastTextGroup}>
                           {renderContent}
                         </Markdown>
                       </Fragment>
@@ -230,15 +217,7 @@ export const AssistantMessage = memo(
                 )}
 
                 {hasContent && (
-                  <Markdown
-                    append={append}
-                    chatMode={chatMode}
-                    setChatMode={setChatMode}
-                    model={model}
-                    provider={provider}
-                    isStreaming={isStreaming}
-                    html
-                  >
+                  <Markdown isStreaming={isStreaming}>
                     {displayContent}
                   </Markdown>
                 )}
