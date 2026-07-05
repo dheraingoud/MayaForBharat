@@ -31,6 +31,9 @@ import {
 } from '@/components/ui/resizable'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 
+// ─── MAYA UI: 4-state SendButton (variant=inline drops into toolbar) ──────────
+import { SendButton } from '@/lib/workbench/components/chat/SendButton.client'
+
 // ─── bolt.diy engine ──────────────────────────────────────────────────────────
 import { useStore } from '@nanostores/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
@@ -1611,8 +1614,18 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   )
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const statusDot = streaming ? 'bg-amber-400' : 'bg-emerald-400'
-  const statusText = streaming ? 'Building' : 'Ready'
+  // M4: anti-AI-slop tokens — kill tailwind-default amber/emerald, use MAYA
+  // orange (#E8601A) / success (#2D7A4F) / error (#F87171).
+  const statusDot = streaming
+    ? 'bg-[#E8601A]'
+    : status === 'error'
+      ? 'bg-[#F87171]'
+      : 'bg-[#2D7A4F]'
+  const statusText = streaming
+    ? 'Building'
+    : status === 'error'
+      ? 'Error'
+      : 'Ready'
   const hasInput = (input || '').trim().length > 0
 
   // Mapped messages for rendering (parsed by engine)
@@ -1716,6 +1729,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
               {mobileTab === 'chat' ? (
                 <ChatPanel
                   messages={displayMessages} setMessages={setMessages} isStreaming={isLoading || fakeLoading}
+                  status={status}
                   input={input} handleInputChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { handleInputChange(e); debouncedCachePrompt(e) }}
                   sendMessage={sendMessage} handleStop={() => { stop(); chatStore.setKey('aborted', true); workbenchStore.abortAllActions() }}
                   actionAlert={actionAlert} clearAlert={() => workbenchStore.clearAlert()}
@@ -1746,6 +1760,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
             <ResizablePanel defaultSize={42} minSize={28} maxSize={62}>
               <ChatPanel
                 messages={displayMessages} setMessages={setMessages} isStreaming={isLoading || fakeLoading}
+                status={status}
                 input={input} handleInputChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { handleInputChange(e); debouncedCachePrompt(e) }}
                 sendMessage={sendMessage} handleStop={() => { stop(); chatStore.setKey('aborted', true); workbenchStore.abortAllActions() }}
                 actionAlert={actionAlert} clearAlert={() => workbenchStore.clearAlert()}
@@ -1790,6 +1805,8 @@ interface ChatPanelProps {
   messages: UIMessage[]
   setMessages?: (messages: UIMessage[]) => void
   isStreaming: boolean
+  /** vercel ChatStatus — drives 4-state SendButton (M4). Falls back to isStreaming. */
+  status?: 'ready' | 'submitted' | 'streaming' | 'error'
   input: string
   handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
   sendMessage: (messageInput?: string) => void
@@ -1823,7 +1840,7 @@ interface ChatPanelProps {
 
 const ChatPanel = memo((
   {
-    messages, setMessages, isStreaming, input, handleInputChange, sendMessage, handleStop,
+    messages, setMessages, isStreaming, status, input, handleInputChange, sendMessage, handleStop,
     actionAlert, clearAlert, progressAnnotations, append, regenerate, addToolResult,
     model, provider, language,
     mayaTiers, selectedTier, setSelectedTier, showTierMenu, setShowTierMenu,
@@ -1840,6 +1857,22 @@ const ChatPanel = memo((
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const hasInput = (input || '').trim().length > 0
+
+  // M4: derive vercel 4-state from useChat `status` (ready/submitted/streaming/
+  // error), falling back to the legacy isStreaming boolean (which already folds
+  // in fakeLoading from the call sites). Drives the inline SendButton. ready →
+  // send; submitted/streaming/error → stop (avoids double-send on submitted).
+  const sendStatus: 'ready' | 'submitted' | 'streaming' | 'error' =
+    status === 'error' ? 'error'
+    : status === 'streaming' || status === 'submitted' ? status
+    : isStreaming ? 'streaming'
+    : 'ready'
+
+  // M4: anti-AI-slop baseline for toolbar icon buttons. Square 32×32 (kills the
+  // 28×36 ellipse + phosphor `block` line-height stretch), tactile active:scale-95,
+  // Maya cubic-bezier (no linear/ease-in-out), leading-none so the icon centers.
+  const btnBase =
+    'h-8 w-8 flex items-center justify-center rounded-lg leading-none shrink-0 active:scale-95 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]'
 
   // Auto-resize textarea
   useEffect(() => {
@@ -2026,12 +2059,13 @@ const ChatPanel = memo((
               />
             </div>
 
-            {/* Bottom toolbar */}
+            {/* Bottom toolbar — M4: anti-AI-slop baseline (square 32×32, MAYA tokens,
+                tactile active:scale-95, cubic-bezier; kills the 28×36 ellipse defect) */}
             <div className="flex items-center justify-between px-2 pb-2 pt-0.5">
               <div className="flex items-center gap-0.5">
                 {/* Attach file button */}
-                <button onClick={() => fileInputRef.current?.click()} className="p-2 rounded-lg text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04] transition-colors" title={language === 'hi' ? 'फ़ाइल जोड़ें' : 'Attach file'}>
-                  <span className="i-ph:plus w-4 h-4 block" />
+                <button onClick={() => fileInputRef.current?.click()} className={`${btnBase} text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04]`} title={language === 'hi' ? 'फ़ाइल जोड़ें' : 'Attach file'}>
+                  <span className="i-ph:plus w-4 h-4" />
                 </button>
 
                 {/* Enhance prompt button */}
@@ -2042,73 +2076,69 @@ const ChatPanel = memo((
                     }
                   }}
                   disabled={!input.trim() || enhancingPrompt || isStreaming}
-                  className={`p-2 rounded-lg transition-colors ${
+                  className={`${btnBase} ${
                     enhancingPrompt
                       ? 'text-[#E8601A] animate-pulse'
                       : promptEnhanced
-                        ? 'text-emerald-400 hover:bg-white/[0.04]'
+                        ? 'text-[#2D7A4F] hover:bg-white/[0.04]'
                         : 'text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04]'
-                  } disabled:opacity-30 disabled:cursor-not-allowed`}
+                  } disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100`}
                   title={enhancingPrompt ? 'Enhancing...' : promptEnhanced ? 'Prompt enhanced ✓' : (language === 'hi' ? 'प्रॉम्प्ट सुधारें' : 'Enhance prompt')}
                 >
-                  <span className="i-ph:magic-wand w-4 h-4 block" />
+                  <span className="i-ph:magic-wand w-4 h-4" />
                 </button>
 
-                {/* Model tier selector */}
+                {/* Model tier selector — labeled chip (not square), same tactile easing */}
                 <div className="relative" ref={tierMenuRef}>
-                  <button ref={tierBtnRef} onClick={() => setShowTierMenu(!showTierMenu)} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[#9E9890] hover:text-[#D4D0CA] hover:bg-white/[0.04] transition-colors">
+                  <button ref={tierBtnRef} onClick={() => setShowTierMenu(!showTierMenu)} className="flex items-center gap-1 px-2.5 h-8 rounded-lg text-[11px] font-medium text-[#9E9890] hover:text-[#D4D0CA] hover:bg-white/[0.04] active:scale-95 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]">
                     <span>{activeTier.label}</span>
-                    <span className={`i-ph:caret-down-bold w-2.5 h-2.5 block transition-transform ${showTierMenu ? 'rotate-180' : ''}`} />
+                    <span className={`i-ph:caret-down-bold w-2.5 h-2.5 transition-transform ${showTierMenu ? 'rotate-180' : ''}`} />
                   </button>
                 </div>
               </div>
 
-              {/* Right: mic + send/stop */}
+              {/* Right: mic + regenerate + send/stop */}
               <div className="flex items-center gap-0.5">
                 {/* Mic button */}
                 <button
                   onClick={toggleMic}
                   disabled={isTranscribing}
-                  className={`p-2 rounded-lg transition-colors ${isRecording ? 'text-red-400 bg-red-500/10 animate-pulse' : isTranscribing ? 'text-amber-400' : hasInput ? 'text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04]' : 'text-[#9E9890] hover:text-[#F5F4F0] hover:bg-white/[0.04]'}`}
+                  className={`${btnBase} ${
+                    isRecording
+                      ? 'text-[#F87171] bg-[#F87171]/10 animate-pulse'
+                      : isTranscribing
+                        ? 'text-[#E8601A]'
+                        : hasInput
+                          ? 'text-[#6B6560] hover:text-[#D4D0CA] hover:bg-white/[0.04]'
+                          : 'text-[#9E9890] hover:text-[#F5F4F0] hover:bg-white/[0.04]'
+                  } disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100`}
                   title={isRecording ? (language === 'hi' ? 'रुकें' : 'Stop recording') : isTranscribing ? (language === 'hi' ? 'लिख रहा है...' : 'Transcribing...') : (language === 'hi' ? 'बोलकर टाइप करें' : 'Voice input')}
                 >
-                  <span className="i-ph:microphone w-4 h-4 block" />
+                  <span className="i-ph:microphone w-4 h-4" />
                 </button>
 
-                {/* Send/Stop */}
-                {isStreaming ? (
-                  <button onClick={handleStop} className="p-2 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-500/[0.06] transition-colors shrink-0" title="Stop">
-                    <span className="i-ph:stop-circle-bold w-3.5 h-3.5 block" />
+                {/* M2: Regenerate — re-roll the last assistant turn. Gated: only
+                    when there are messages to re-roll. Hidden while streaming so
+                    the SendButton owns the stop affordance. */}
+                {messages.length > 0 && !isStreaming && (
+                  <button
+                    onClick={regenerate}
+                    className={`${btnBase} text-[#9E9890] hover:text-[#E8601A] hover:bg-[#E8601A]/[0.06]`}
+                    title={language === 'hi' ? 'फिर से जवाब दें' : 'Regenerate response'}
+                  >
+                    <span className="i-ph:arrow-clockwise w-3.5 h-3.5" />
                   </button>
-                ) : (
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    {/* M2: Regenerate — re-roll the last assistant turn. Surfaced
-                        from useChat's regenerate (already in scope). Gated: only
-                        when there are messages to re-roll. i-ph:arrow-clockwise. */}
-                    {messages.length > 0 && (
-                      <button
-                        onClick={regenerate}
-                        className="p-2 rounded-lg text-[#9E9890] hover:text-[#E8601A] hover:bg-[#E8601A]/[0.06] transition-colors"
-                        title={language === 'hi' ? 'फिर से जवाब दें' : 'Regenerate response'}
-                      >
-                        <span className="i-ph:arrow-clockwise w-3.5 h-3.5 block" />
-                      </button>
-                    )}
-                    {hasInput && (
-                      <motion.button
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.8, opacity: 0 }}
-                        transition={{ duration: 0.12, ease: 'easeOut' }}
-                        onClick={() => sendMessage()}
-                        className="p-1.5 rounded-full bg-[#E8601A] text-white hover:bg-[#C94E12] transition-colors shrink-0"
-                        title="Send"
-                      >
-                        <span className="i-ph:arrow-up-bold w-3.5 h-3.5 block" />
-                      </motion.button>
-                    )}
-                  </div>
                 )}
+
+                {/* M4: 4-state SendButton (variant=inline) — ArrowUp send, Square
+                    stop, Loader2 spinner, X error. Replaces the rounded-full ellipse
+                    + dual stop/send block. ready → sendMessage; else → handleStop. */}
+                <SendButton
+                  variant="inline"
+                  status={sendStatus}
+                  disabled={!hasInput && sendStatus === 'ready'}
+                  onClick={sendStatus === 'ready' ? () => sendMessage() : handleStop}
+                />
               </div>
             </div>
           </div>
