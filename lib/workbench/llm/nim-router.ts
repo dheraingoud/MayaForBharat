@@ -37,7 +37,7 @@
 
 import type { ModelInfo } from '@/lib/workbench/llm/types';
 import type { LanguageModel } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 1. NIM ENDPOINT
@@ -389,7 +389,12 @@ export function createNimModel(
   const isR1 = /deepseek-r1/i.test(bareModelId);
   const isMinimax = /minimax-m3/i.test(bareModelId);
   const isQwen3 = /qwen3/i.test(bareModelId);
-  const isReasoning = isV4 || isR1 || isMinimax || isQwen3;
+  // StepFun step-3 family: emits delta.reasoning_content BEFORE the answer.
+  // Must run through the reasoning branch so chat_template_kwargs.thinking
+  // gets injected + max_completion_tokens is used — otherwise the model burns
+  // the whole text budget on reasoning and the bolt XML answer never streams.
+  const isStepfun = /stepfun-ai\/step-3/i.test(bareModelId);
+  const isReasoning = isV4 || isR1 || isMinimax || isQwen3 || isStepfun;
 
   /**
    * Custom fetch for retry-on-400/500 and key health tracking.
@@ -559,20 +564,24 @@ export function createNimModel(
     return response;
   };
 
-  const nim = createOpenAI({
+  // ⚠️ Use `createOpenAICompatible` from `@ai-sdk/openai-compatible`, NOT
+  // `createOpenAI` from `@ai-sdk/openai`. `@ai-sdk/openai`'s chat model (even
+  // in `compatibility:'compatible'` mode) does NOT parse NIM's streaming
+  // `delta.reasoning_content` field — it drops every reasoning delta, so
+  // reasoning models (stepfun step-3, deepseek-v4, minimax-m3, qwen3) never
+  // surface a "Thinking…" phase and the vercel progressive-UI mandate breaks.
+  // `createOpenAICompatible` parses `delta.reasoning_content` →
+  // reasoning-start/delta/end frames → ReasoningUIPart → ThoughtBox streams.
+  const nim = createOpenAICompatible({
     name: 'nvidia-nim',
     baseURL: overrideBaseUrl || NIM_BASE_URL,
     apiKey: effectiveKey,
     fetch: nimFetch as any,
-    // 'compatible' mode tells the SDK this is an OpenAI-compatible endpoint
-    // (not actual OpenAI) — it adjusts response parsing accordingly.
-    compatibility: 'compatible',
+    // NIM models don't support structured outputs
+    supportsStructuredOutputs: false,
   });
 
-  return nim.chat(bareModelId, {
-    // Disable structured outputs — NIM models don't support them
-    structuredOutputs: false,
-  });
+  return nim.chatModel(bareModelId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

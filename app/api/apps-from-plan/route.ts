@@ -14,7 +14,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@/convex/_generated/api';
 import { randomUUID } from 'crypto';
 import { streamText as _streamText } from 'ai';
-import { createNimModel } from '@/lib/workbench/llm/nim-router';
+import { createNimModel, resolveModel } from '@/lib/workbench/llm/nim-router';
 import { createScopedLogger } from '@/lib/workbench/utils/logger';
 
 export const dynamic = 'force-dynamic';
@@ -192,6 +192,13 @@ export async function POST(req: NextRequest) {
   const miniModelEnv = process.env.MAYA_MINI || 'stepfun-ai/step-3.7-flash';
   const bareModel = miniModelEnv.replace(/^nvidia-nim\//i, '');
   const provider = 'NvidiaNIM';
+  // Budget maxOutputTokens from the nim-router catalog caps — same fix the
+  // CLAUDE.md "empty LLM output" note mandates. stepfun-3.7-flash cap=16384,
+  // minimax-m3 cap=16384. The plan JSON is small but reasoning models emit
+  // many reasoning tokens BEFORE the answer; 6.5s + 2048 truncated both
+  // attempts to length=0. Budget generously + give the model time to finish.
+  const catalogCap = resolveModel(bareModel).maxCompletionTokens; // 16384 for stepfun/minimax
+  const planBudget = Math.min(catalogCap, 16384);
 
   let plan: any = null;
   let rawText = '';
@@ -214,12 +221,13 @@ export async function POST(req: NextRequest) {
           { role: 'system', content: PLAN_SYSTEM_PROMPT },
           { role: 'user', content: userContent },
         ],
-        // Reasoning models (deepseek-v4-flash et al) emit many reasoning tokens
-        // BEFORE the answer; 700 truncated them to length=0 output -> heuristic
-        // fallback (the "truth not heuristics" complaint). Give headroom by
-        // default; the 2nd (reminder, temp=0) attempt below passes a larger
-        // budget explicitly. Well under all catalog models' 16384 cap.
-        maxOutputTokens: overrides.maxOutputTokens ?? 2048,
+        // Reasoning models (stepfun-3.7-flash, minimax-m3, deepseek-v4 et al)
+        // emit many reasoning tokens BEFORE the answer; small budgets + a 6.5s
+        // timeout truncated both attempts to length=0 -> heuristic fallback
+        // -> "Model returned no files" on the workbench. Budget from the catalog
+        // cap (16384) and let the call run to completion. The race still
+        // cancels whichever attempt loses — just no longer aborts the winner.
+        maxOutputTokens: overrides.maxOutputTokens ?? planBudget,
         temperature: overrides.temperature ?? 0.7,
         abortSignal: signal,
       });
@@ -282,7 +290,7 @@ export async function POST(req: NextRequest) {
 
     const firstP = withTimeout(
       tryOnce({}, firstAbort.signal),
-      6500,
+      90000,
       'first-attempt',
       () => firstAbort.abort(),
     );
@@ -293,11 +301,11 @@ export async function POST(req: NextRequest) {
           reminder:
             'Reply with ONLY a single raw JSON object matching the system schema. ' +
             'No prose, no markdown fences, no commentary, no trailing text.',
-          maxOutputTokens: 4096,
+          maxOutputTokens: planBudget,
         },
         secondAbort.signal,
       ),
-      6500,
+      90000,
       'second-attempt',
       () => secondAbort.abort(),
     );

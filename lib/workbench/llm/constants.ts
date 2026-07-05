@@ -47,6 +47,9 @@ export function isReasoningModel(modelName: string): boolean {
   if (/minimax-m3/i.test(modelName)) return true;
   // Qwen3 supports reasoning
   if (/qwen3/i.test(modelName)) return true;
+  // StepFun step-3 family emits delta.reasoning_content BEFORE the answer —
+  // must use maxCompletionTokens so the bolt XML answer actually streams.
+  if (/stepfun-ai\/step-3/i.test(modelName)) return true;
   return false;
 }
 
