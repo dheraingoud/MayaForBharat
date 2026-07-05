@@ -97,7 +97,11 @@ export default function LandingPage() {
     { label: 'Maya Max', model: 'minimaxai/minimax-m3', provider: 'NvidiaNIM', description: 'Most capable', inputPrice: '$1.00', outputPrice: '$4.00' },
   ]
   const [mayaTiers, setMayaTiers] = useState<MayaTier[]>(DEFAULT_TIERS)
-  const [selectedTier, setSelectedTier] = useState(1) // Default: Maya Balanced
+  // Default: Maya Mini (index 0, stepfun-ai/step-3.7-flash). NOT index 1
+  // "Balanced" = deepseek-ai/deepseek-v4-flash — NVIDIA returns 400 "DEGRADED
+  // function cannot be invoked" on it (plan M7: "NOT fast"). Mini is the
+  // approved, proven-working cheap default.
+  const [selectedTier, setSelectedTier] = useState(0)
   const [showTierMenu, setShowTierMenu] = useState(false)
   const tierBtnRef = useRef<HTMLButtonElement>(null)
   const tierMenuRef = useRef<HTMLDivElement>(null)

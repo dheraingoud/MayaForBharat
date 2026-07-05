@@ -169,7 +169,13 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   const actionAlert = useStore(workbenchStore.alert)
 
   // ─── Maya model tier ────────────────────────────────────────────────────────
-  const [selectedTier, setSelectedTier] = useState(1) // Default: Maya Balanced
+  // Default: Maya Mini (index 0, stepfun-ai/step-3.7-flash). NOT index 1
+  // "Balanced" = deepseek-ai/deepseek-v4-flash — the fast tier, which NVIDIA
+  // returns 400 "DEGRADED function cannot be invoked" on (and the plan's M7
+  // rule forbids: "NOT fast — confirmed 404/degraded across all keys"). Every
+  // fresh /workbench load previously defaulted to the broken tier → first send
+  // 400'd. Mini is the approved, proven-working cheap default.
+  const [selectedTier, setSelectedTier] = useState(0)
   const [showTierMenu, setShowTierMenu] = useState(false)
   const tierMenuRef = useRef<HTMLDivElement>(null)
   const [mayaTiers, setMayaTiers] = useState<MayaTier[]>(DEFAULT_MAYA_TIERS)
