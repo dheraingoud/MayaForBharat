@@ -117,13 +117,21 @@ export const ToolInvocations = memo(({ toolInvocations, toolCallAnnotations, add
             <div className="i-ph:wrench text-xl text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary transition-colors"></div>
           </div>
           <div className="p-2.5 w-full text-left">
-            <div className="w-full text-bolt-elements-textPrimary font-medium leading-5 text-sm">
-              MCP Tool Invocations{' '}
+            <div className="w-full flex items-center gap-2 text-bolt-elements-textPrimary font-medium leading-5 text-sm">
+              <span>MCP Tool Invocations</span>
               {hasToolResults && (
-                <span className="w-full w-full text-bolt-elements-textSecondary text-xs mt-0.5">
+                <span className="text-bolt-elements-textSecondary text-xs">
                   ({toolResults.length} tool{hasToolResults ? 's' : ''} used)
                 </span>
               )}
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#1A1917] ring-1 ring-white/[0.06] text-bolt-elements-textSecondary">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    hasToolCalls && !hasToolResults ? 'bg-[#E8601A] animate-pulse' : hasToolResults ? 'bg-[#2D7A4F]' : 'bg-[#6B6560]'
+                  }`}
+                />
+                {hasToolCalls && !hasToolResults ? 'Awaiting' : hasToolResults ? 'Completed' : 'Idle'}
+              </span>
             </div>
           </div>
         </button>
@@ -254,11 +262,11 @@ const ToolResultsList = memo(({ toolInvocations, toolCallAnnotations, theme }: T
                   <span className="text-bolt-elements-textPrimary font-semibold">{annotation?.toolDescription}</span>
                 </div>
                 <div className="text-bolt-elements-textSecondary text-xs mb-1">Parameters:</div>
-                <div className="bg-[#FAFAFA] dark:bg-[#0A0A09] p-3 rounded-md">
+                <div className="bg-[#0E0D0C] p-3 rounded-md">
                   <JsonCodeBlock className="mb-0" code={JSON.stringify(tool.toolInvocation.args)} theme={theme} />
                 </div>
                 <div className="text-bolt-elements-textSecondary text-xs mt-3 mb-1">Result:</div>
-                <div className="bg-[#FAFAFA] dark:bg-[#0A0A09] p-3 rounded-md">
+                <div className="bg-[#0E0D0C] p-3 rounded-md">
                   <JsonCodeBlock className="mb-0" code={JSON.stringify(tool.toolInvocation.result)} theme={theme} />
                 </div>
               </div>
