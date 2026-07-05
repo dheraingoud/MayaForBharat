@@ -6,6 +6,7 @@ import { forwardRef, memo, useEffect, useImperativeHandle, useRef } from 'react'
 import type { Theme } from '@/lib/workbench/stores/theme';
 import { createScopedLogger } from '@/lib/workbench/utils/logger';
 import { getTerminalTheme } from './theme';
+import { decideFollowOnWrite } from './terminal-scroll';
 
 const logger = createScopedLogger('Terminal');
 
@@ -121,10 +122,20 @@ export const Terminal = memo(
         });
 
         // Auto-scroll to bottom on new data ONLY when the user is already
-        // at the bottom. This is the fix for the "unscrollable" bug — the
-        // previous code called scrollToBottom unconditionally.
+        // at the bottom. F3: re-query the actual bottom at write time rather
+        // than trusting userScrolledUpRef (cached from the last onScroll) —
+        // during a fast write flood (npm install), xterm can fire a transient
+        // onScroll with viewportY < baseY before the viewport re-pins, flipping
+        // the ref true even though no user scrolled, which then gated
+        // scrollToBottom for the rest of the flood. The live bottom check is
+        // authoritative; the ref is an advisory hint that self-heals here.
         const onWriteDisposable = terminal.onWriteParsed(() => {
-          if (!userScrolledUpRef.current) {
+          const { follow, newRef } = decideFollowOnWrite(
+            userScrolledUpRef.current,
+            isAtBottom(),
+          );
+          userScrolledUpRef.current = newRef;
+          if (follow) {
             terminal.scrollToBottom();
           }
         });
