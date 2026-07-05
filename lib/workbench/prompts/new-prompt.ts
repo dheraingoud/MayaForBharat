@@ -198,14 +198,12 @@ The year is 2025.
   ALL commands (npm install, npm run dev) MUST be executed via <boltAction type="shell"> or <boltAction type="start"> tags.
   After writing files, ALWAYS follow this EXACT build pipeline in order:
     1) <boltAction type="shell">npm install</boltAction>
-    2) <boltAction type="shell">npm run build</boltAction>  (catches compile/type errors early)
-    3) <boltAction type="shell">npx vitest run --reporter=verbose 2>&1 || true</boltAction>  (runs tests, non-blocking)
-    4) <boltAction type="start">npm run dev</boltAction>  (starts the preview server)
-  NEVER skip the build and test steps. They catch errors BEFORE the user sees a broken preview.
+    2) <boltAction type="start">npm run dev</boltAction>  (starts the preview server; Vite reports compile/type errors live in the preview overlay)
+  NEVER skip npm install or npm run dev. Vite dev transpiles TypeScript via esbuild (no separate build step) and surfaces errors live in the preview, where they are auto-fixed.
   Text like "Now run npm install" or "Start the dev server with..." is FORBIDDEN.
-  CRITICAL: Always include "build" and "test" scripts in package.json:
-    - "build": "vite build" (or "tsc && vite build" for TypeScript)
-    - "test": "vitest run" (add vitest to devDependencies)
+  CRITICAL: Always include a "dev" script in package.json: "dev": "vite" (or "vite dev" for older Vite).
+  Do NOT include a "test": "vitest run" script or add vitest to devDependencies — generated apps have no test files, so running vitest exits non-zero and fails the build.
+  Do NOT gate on "build": "vite build"; Vite dev transpiles TypeScript without a separate build gate.
 
   FAILURE RECOVERY (auto-fix mode):
   When you receive a message containing "Auto-fix attempt" or "Auto-diagnostics", it means a previous build/start FAILED.
@@ -215,8 +213,6 @@ The year is 2025.
     3. Check for cascading issues: if one import is wrong, check ALL imports in that file
     4. ALWAYS include the FULL build pipeline at the end of your artifact:
        <boltAction type="shell">npm install</boltAction>
-       <boltAction type="shell">npm run build</boltAction>
-       <boltAction type="shell">npx vitest run --reporter=verbose 2>&1 || true</boltAction>
        <boltAction type="start">npm run dev</boltAction>
     5. Do NOT output explanatory text — just the <boltArtifact> with fixes
     6. Root causes to check:
@@ -427,19 +423,12 @@ The year is 2025.
   - Snapshots catch: missing elements, broken layouts, removed components, structural regressions
   - Example: expect(container.innerHTML).toMatchSnapshot()
 
-  ZERO-DOWNTIME EVOLUTION RULES (CRITICAL):
-  1. INITIAL SCAFFOLD: After generating the app, write ALL tests, then run: npx vitest run
-  2. FEATURE ADDITION: Write new tests FIRST, then implement the feature, then run ALL tests
-  3. BUG FIX: Write a failing test that reproduces the bug, fix the code, verify test passes
-  4. BEFORE COMPLETION: Every boltAction sequence must end with running the test suite
-  5. ON FAILURE: If tests fail, the auto-fix loop will kick in (up to 5 attempts). Fix the SOURCE CODE, never the tests.
-  6. REGRESSION GUARD: When modifying existing code, run the full suite to catch regressions
-
-  package.json SCRIPTS (always add these):
-  - "test": "vitest run"
-  - "test:watch": "vitest"
-  - "test:coverage": "vitest run --coverage"
-  - "test:ui": "vitest --ui"
+  TEST EXECUTION (ONLY when the user explicitly asked for tests):
+  - NEVER run vitest as part of the initial build pipeline. The default build pipeline is ALWAYS just npm install then npm run dev. Nothing else.
+  - If (and only if) the user asked for tests AND you actually wrote test files, you MAY run "npx vitest run" AFTER the dev server is confirmed running - never as a blocking gate before the preview boots.
+  - Never add vitest to package.json or run it on apps without test files - it exits non-zero ("No test files found") and triggers a fatal auto-fix rebuild loop.
+  - Do NOT add "test", "test:watch", "test:coverage", or "test:ui" scripts to package.json by default. Only when the user explicitly asks for tests.
+  - On any test failure: fix the SOURCE CODE, never the tests (unless the test itself is wrong).
 
   FILE STRUCTURE:
   src/

@@ -139,7 +139,7 @@ export function useAutoVerification({
       const errorSummary = previewErrors!.slice(-5).join('\n')
       logger.info(`[AutoVerify] MANDATORY: Sending error-based fix (${previewErrors!.length} errors)`)
 
-      const verifyMsg = `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n*🔴 MANDATORY Auto-Verification: Runtime errors detected in preview.*\n\nThe app loaded but reported these runtime errors:\n\`\`\`\n${errorSummary}\n\`\`\`\n\nFix ALL errors immediately. After fixing, ALWAYS include the FULL build pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="shell">npm run build</boltAction>\`\n3. \`<boltAction type="shell">npx vitest run --reporter=verbose 2>&1 || true</boltAction>\`\n4. \`<boltAction type="start">npm run dev</boltAction>\`\nDo NOT explain. Just output the boltArtifact with fixed files.`
+      const verifyMsg = `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n*🔴 MANDATORY Auto-Verification: Runtime errors detected in preview.*\n\nThe app loaded but reported these runtime errors:\n\`\`\`\n${errorSummary}\n\`\`\`\n\nFix ALL errors immediately. After fixing, ALWAYS include the FULL build pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="start">npm run dev</boltAction>\`\nDo NOT explain. Just output the boltArtifact with fixed files.`
 
       setTimeout(() => chatSendMessage({ text: verifyMsg }), 1500)
 
@@ -149,7 +149,7 @@ export function useAutoVerification({
       // Iframe exists but may be blank
       logger.info('[AutoVerify] MANDATORY: Preview blank — sending fix request')
 
-      const verifyMsg = `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n*🔴 MANDATORY Auto-Verification: Preview is showing a BLANK screen.*\n\nThe preview iframe loaded but nothing is visible. This MUST be fixed.\n\nCommon causes:\n1. React root not rendering (missing ReactDOM.render/createRoot)\n2. CSS hiding content (display:none, opacity:0, zero height)\n3. Router not matching "/" route\n4. JavaScript errors preventing render\n5. Missing default export in page component\n\nReview and fix the main entry file, App component, and router. After fixing, ALWAYS include the FULL build pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="shell">npm run build</boltAction>\`\n3. \`<boltAction type="shell">npx vitest run --reporter=verbose 2>&1 || true</boltAction>\`\n4. \`<boltAction type="start">npm run dev</boltAction>\`\n\nDo NOT explain. Just output the boltArtifact with fixed files.`
+      const verifyMsg = `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n*🔴 MANDATORY Auto-Verification: Preview is showing a BLANK screen.*\n\nThe preview iframe loaded but nothing is visible. This MUST be fixed.\n\nCommon causes:\n1. React root not rendering (missing ReactDOM.render/createRoot)\n2. CSS hiding content (display:none, opacity:0, zero height)\n3. Router not matching "/" route\n4. JavaScript errors preventing render\n5. Missing default export in page component\n\nReview and fix the main entry file, App component, and router. After fixing, ALWAYS include the FULL build pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="start">npm run dev</boltAction>\`\n\nDo NOT explain. Just output the boltArtifact with fixed files.`
 
       setTimeout(() => chatSendMessage({ text: verifyMsg }), 1500)
     } else {
