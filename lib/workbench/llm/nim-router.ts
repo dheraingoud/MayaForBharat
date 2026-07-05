@@ -167,7 +167,15 @@ interface NimModelEntry {
  */
 const NIM_MODEL_CATALOG: Record<string, NimModelEntry> = {
   // ── DeepSeek ──
-  'deepseek-ai/deepseek-v4-flash':       { maxTokenAllowed: 1048576, maxCompletionTokens: 16384 },
+  // maxCompletionTokens bumped 16384 → 28672: deepseek-v4-flash (MAYA_FAST
+  // default) emits reasoning_content BEFORE the answer (hybrid reasoning mode),
+  // mirroring the stepfun step-3.7-flash truncation pattern. With the prior
+  // 16384 cap + reasoning budget subtraction (~floor(max/3) ≈ 5461), only
+  // ~10.9k tokens were left for the bolt XML answer — a multi-file build needs
+  // 12-15k → truncated mid-XML, no <boltArtifact> ever closed, zero file cards.
+  // 28672 with the 1M context window leaves ample prompt room and gives the
+  // answer ~21k after reasoning. Same class of fix as the stepfun bump at L181.
+  'deepseek-ai/deepseek-v4-flash':       { maxTokenAllowed: 1048576, maxCompletionTokens: 28672 },
   'deepseek-ai/deepseek-r1':             { maxTokenAllowed: 131072, maxCompletionTokens: 8192,  label: 'DeepSeek R1 (Reasoning)' },
   'deepseek-ai/deepseek-v3':             { maxTokenAllowed: 131072, maxCompletionTokens: 8192 },
 
