@@ -18,6 +18,7 @@ import type { ToolCallAnnotation } from '@/lib/workbench/types/context';
 import ThoughtBox from './ThoughtBox';
 import { BuildErrorCard } from './BuildErrorCard';
 import { MessageActions } from './MessageActions';
+import { SparklesIcon } from 'lucide-react';
 
 interface AssistantMessageProps {
   content: string;
@@ -122,10 +123,14 @@ export const AssistantMessage = memo(
     }, [showBuildError]);
 
     return (
-      <div className="group/message overflow-hidden w-full">
-        {/* vercel-chatbot Message style: no avatar, content then actions below.
-            group/message drives hover-reveal of MessageActions. */}
-        <div className="flex-1 min-w-0">
+      <div className="group/message overflow-hidden w-full flex items-start gap-3">
+        {/* vercel-chatbot Message style: small avatar (Maya orange Sparkles) then
+            content + actions below. group/message drives hover-reveal of
+            MessageActions. */}
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#1A1917] ring-1 ring-white/[0.06]">
+          <SparklesIcon size={13} className="text-[#E8601A]" />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm text-[#D4D0CA]">
             {/* ─── Interleaved rendering: thinking → response → thinking → response ─── */}
             {/* Renders parts in chronological order for a progressive experience */}
             {/* Phase R2: inline streaming status pill + cursor blink deleted — */}
