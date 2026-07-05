@@ -41,6 +41,33 @@ export const messageParser = new StreamingMessageParser({
   },
 });
 
+/**
+ * Pure next-state for parsed-messages. Preserves object identity when a
+ * re-parse yields no change, so `setParsedMessages` does NOT trigger a
+ * re-render on no-op. Without this, every sampled parse (createSampler 50ms)
+ * spreads a fresh object → BuilderPage effect deps `[messages, isLoading,
+ * parseMessages]` re-fires → "Maximum update depth exceeded" during the
+ * file-write flood. The loop: new identity setState → re-render → effect →
+ * parseMessages → new identity setState.
+ *
+ * @param prev     existing parsed map (by message index)
+ * @param index    message index being parsed
+ * @param delta    new content parsed this pass
+ * @param isLoading streaming — append to existing; else replace
+ * @returns prev (same ref) on no-op, else a new object
+ */
+export function nextParsedState(
+  prev: { [key: number]: string },
+  index: number,
+  delta: string,
+  isLoading: boolean,
+): { [key: number]: string } {
+  const existing = prev[index] || '';
+  const next = isLoading ? existing + delta : delta;
+  if (next === existing) return prev;
+  return { ...prev, [index]: next };
+}
+
 function extractTextContent(message: UIMessage): string {
   // AI SDK v6: UIMessage has parts array instead of content string
   if ('parts' in message && Array.isArray(message.parts)) {
@@ -105,10 +132,7 @@ export function useMessageParser() {
       // and should never be fed into the bolt artifact streaming parser
       if (message.role === 'assistant') {
         const newParsedContent = messageParser.parse(message.id, extractTextContent(message));
-        setParsedMessages((prevParsed) => ({
-          ...prevParsed,
-          [index]: isLoading ? (prevParsed[index] || '') + newParsedContent : newParsedContent,
-        }));
+        setParsedMessages((prevParsed) => nextParsedState(prevParsed, index, newParsedContent, isLoading));
       }
     }
   }, []);
