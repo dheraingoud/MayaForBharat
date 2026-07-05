@@ -1954,17 +1954,10 @@ const ChatPanel = memo((
         stiffness={0.05}
       >
         <StickToBottom.Content className="flex flex-col gap-2 relative pb-4 modern-scrollbar">
-          {messages.length === 0 && !isStreaming && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-11 h-11 rounded-xl bg-[#E8601A]/[0.07] flex items-center justify-center mb-3.5">
-                <svg className="w-5 h-5 text-[#E8601A]/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-              </div>
-              <p className="text-[13px] text-[#6B6560] leading-relaxed max-w-[220px]">
-                {language === 'hi' ? 'अपने ऐप का विवरण बताएं' : 'Describe your idea, we will bring it to life..'}
-              </p>
-            </div>
-          )}
-
+          {/* F4: old inline empty-state removed — <Greeting> (Messages.client
+              :105-109) is the single authority for the empty workbench. The
+              stale block here rendered the legacy "Describe your idea" bubble
+              and made the redesigned chat "look the same" on empty state. */}
           <ClientOnly>
             {() => (
               <Messages
