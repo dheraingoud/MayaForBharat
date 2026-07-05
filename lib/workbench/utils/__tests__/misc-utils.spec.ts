@@ -151,9 +151,11 @@ describe('remarkPlugins', () => {
 })
 
 describe('rehypePlugins', () => {
-  it('includes rehypeRaw when html=true', () => {
+  it('includes rehypeRaw + rehypeStripBoltTags when html=true', () => {
+    // D3 hardening: rehypeStripBoltTags runs AFTER rehypeRaw so stray bolt XML
+    // never renders as visible text. Two plugins, not one.
     const plugins = rehypePlugins(true)
-    expect(plugins.length).toBe(1)
+    expect(plugins.length).toBe(2)
   })
 
   it('returns empty array when html=false', () => {

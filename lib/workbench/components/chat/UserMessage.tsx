@@ -65,6 +65,13 @@ export function UserMessage({
     const textItem = resolvedContent.find((item) => item.type === 'text');
     const textContent = stripMetadata(textItem?.text || '');
 
+    // F2: if the bubble text was fully stripped (auto-fix breadcrumb that the
+    // model/auto-fix loop sent as a role:'user' message) and there are no
+    // images, render NOTHING — no fake user bubble, no actions. This is the
+    // "user only sees what they type" contract. The auto-fix still runs; its
+    // status surfaces via toast + BuildErrorCard, not a user bubble.
+    if (!textContent && images.length === 0) return null;
+
     // M2: in-place edit swap — editor replaces the bubble while editing.
     if (isEditing) {
       return (
@@ -119,6 +126,9 @@ export function UserMessage({
   }
 
   const textContent = stripMetadata(typeof resolvedContent === 'string' ? resolvedContent : '');
+
+  // F2: stripped-empty (auto-fix breadcrumb) + no images → render nothing.
+  if (!textContent && images.length === 0) return null;
 
   // M2: in-place edit swap — editor replaces the bubble while editing.
   if (isEditing) {
@@ -206,7 +216,10 @@ function resolveContent(
   return content;
 }
 
-function stripMetadata(content: string) {
+// Exported for unit-testing the auto-fix breadcrumb / bolt-tag strip contract
+// (F2 regression guard: a breadcrumb must collapse to '' so UserMessage renders
+// nothing — no fake user bubble during auto-fix).
+export function stripMetadata(content: string) {
   if (!content) return '';
   const artifactRegex = /<boltArtifact\s+[^>]*>[\s\S]*?<\/boltArtifact>/gm;
   // Defense-in-depth: strip any stray <boltAction>…</boltAction> tags so
@@ -222,9 +235,20 @@ function stripMetadata(content: string) {
   const openArtifactRegex = /<boltArtifact\s+[^>]*>/gm;
   const openActionRegex = /<boltAction\s+[^>]*>/gm;
   const selfClosingArtifactRegex = /<boltArtifact\s+[^>]*\/>/gm;
-  // Strip the auto-fix breadcrumb preamble if it ever leaks into a user msg
-  // ("*Auto-fix attempt 1/15 — Fix this terminal error*").
-  const autoFixPreambleRegex = /\*Auto-fix attempt\s+\d+\/\d+[^*]*\*/g;
+  // Strip the auto-fix breadcrumb preamble if it ever leaks into a user msg.
+  // Covers ALL breadcrumb formats the auto-fix/continue loops emit:
+  //   "*Auto-fix attempt 1/15 — Fix this terminal error*"  (legacy asterisked)
+  //   "MAYA is fixing a terminal error (attempt 1/15)…"
+  //   "MAYA is fixing a preview error (attempt 1/15)…"
+  //   "MAYA is continuing the build (attempt 1/15)…"
+  // Without this, the auto-fix subscriber (BuilderPage) sends these as a
+  // role:'user' message → they rendered as a FAKE USER BUBBLE ("a message
+  // going from the user without the user typing anything"). Stripping them
+  // here collapses the bubble to empty → UserMessage renders nothing (see
+  // the empty-textContent guards in the render paths below). The LLM still
+  // sees the real error context via pipelineInstructionsRef (server-injected),
+  // so the fix loop still triggers; only the visible bubble dies.
+  const autoFixPreambleRegex = /(?:\*Auto-fix attempt\s+\d+\/\d+[^*]*\*|MAYA is (?:fixing a (?:terminal|preview) error|continuing the build) \(attempt\s+\d+\/\d+\)[^]*?(?:…|\.)\s*)/g;
   // Strip ANSI color escapes that WebContainer terminal dumps can carry.
   const ansiRegex = /\x1b\[[0-9;]*[A-Za-z]/g;
   const planContextRegex = /\n*---\s*APP PLAN.*?---\s*END PLAN\s*---.*?architecture\./gs;
