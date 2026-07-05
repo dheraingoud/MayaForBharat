@@ -187,13 +187,22 @@ export class ActionRunner {
       return; // No return value here
     }
 
-    if (isStreaming && action.type !== 'file') {
-      logger.debug(`[runAction] Deferring ${action.type} action ${actionId} — streaming in progress`);
-      return; // No return value here
+    // F1: during streaming, merge the content delta into state ONLY — never
+    // execute (no writeFile, no shell spawn). Execution is deferred to
+    // onActionClose (isStreaming=false). Previously file actions were exempted
+    // from this defer (the `&& action.type !== 'file'` guard), so every token
+    // delta re-ran #runFileAction → writeFile fired 8× in 1s → nanostores
+    // setKey storm → React "Maximum update depth exceeded" → the execution
+    // queue jammed before <boltAction type="start"> ever ran ("commands don't
+    // run after files written"). Vercel-chatbot's onStreamPart only mutates
+    // state; we mirror that here. The disk write happens exactly once at close.
+    if (isStreaming) {
+      this.#updateAction(actionId, { ...action, ...data.action });
+      return;
     }
 
     logger.info(`[runAction] Executing ${action.type} action ${actionId} (isStreaming=${isStreaming})`);
-    this.#updateAction(actionId, { ...action, ...data.action, executed: !isStreaming });
+    this.#updateAction(actionId, { ...action, ...data.action, executed: true });
 
     this.#currentExecutionPromise = this.#currentExecutionPromise
       .then(() => {

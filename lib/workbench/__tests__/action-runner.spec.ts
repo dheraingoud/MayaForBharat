@@ -5,6 +5,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 // We can't directly test private methods, so we test the public API and class behavior.
 // Import the types we need
 import type { ActionCallbackData } from '@/lib/workbench/runtime/message-parser';
+import { ActionRunner } from '@/lib/workbench/runtime/action-runner';
 
 // ═══════════════════════════════════════════════════════════════════
 // 1. Build Command Detection (regex-based, test indirectly)
@@ -253,5 +254,99 @@ describe('Shell Command Validation', () => {
     expect(/^(cp|mv)\s+/.test('cp file1 file2')).toBe(true);
     expect(/^(cp|mv)\s+/.test('mv old new')).toBe(true);
     expect(/^(cp|mv)\s+/.test('cat file')).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. ActionRunner dedup — file action writes ONCE across stream+close
+//    Regression: L196 `executed: !isStreaming` reset dedup every delta,
+//    so onActionStream re-fired writeFile 8× in 1s → "Maximum update
+//    depth exceeded" → stream/execution queue jam → start command never
+//    ran. A file action must merge content deltas (state-only) during
+//    streaming and write to disk exactly once at close.
+// ═══════════════════════════════════════════════════════════════════
+
+describe('ActionRunner file-action dedup', () => {
+  function makeFakeWebcontainer() {
+    const fs = {
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+    };
+    const webcontainer = {
+      workdir: '/home/project',
+      fs,
+    };
+    return { webcontainer, fs };
+  }
+
+  function makeFakeShell() {
+    return {
+      ready: vi.fn().mockResolvedValue(undefined),
+      terminal: {},
+      process: {},
+      executeCommand: vi.fn().mockResolvedValue({ exitCode: 0, output: '' }),
+    };
+  }
+
+  function makeFileData(actionId: string, filePath: string, content: string): ActionCallbackData {
+    return {
+      artifactId: 'art-1',
+      messageId: 'msg-1',
+      actionId,
+      action: { type: 'file', filePath, content },
+    };
+  }
+
+  it('writes a file exactly ONCE when runAction is called for each streaming delta then close', async () => {
+    const { webcontainer, fs } = makeFakeWebcontainer();
+    const shell = makeFakeShell();
+
+    const runner = new ActionRunner(
+      Promise.resolve(webcontainer as any),
+      () => shell as any,
+    );
+
+    const actionId = 'file-1';
+    const filePath = '/home/project/src/App.tsx';
+    const deltas = ['imp', 'ort Rea', 'ct from ', "'react'", ';', '\nexport default function App(){}'];
+    let lastData = makeFileData(actionId, filePath, '');
+    // Open — onActionOpen fires first, registering the action in the store.
+    runner.addAction(lastData);
+    // Stream deltas — onActionStream fires once per token batch
+    for (const d of deltas) {
+      lastData = makeFileData(actionId, filePath, d);
+      await runner.runAction(lastData, true);
+    }
+    // Close — onActionClose fires with the full final content
+    await runner.runAction(lastData, false);
+
+    // Bug: writeFile is called once per streaming delta + once at close (≈7×).
+    // Correct: writeFile called exactly ONCE (content merges into state, disk
+    // write deferred to close).
+    expect(fs.writeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-write the file when runAction fires again after completion', async () => {
+    const { webcontainer, fs } = makeFakeWebcontainer();
+    const shell = makeFakeShell();
+
+    const runner = new ActionRunner(
+      Promise.resolve(webcontainer as any),
+      () => shell as any,
+    );
+
+    const actionId = 'file-2';
+    const filePath = '/home/project/src/Foo.tsx';
+    const data = makeFileData(actionId, filePath, 'export const Foo = 1');
+
+    // Open + first complete run executes once.
+    runner.addAction(data);
+    await runner.runAction(data, false);
+    // A late re-fire (e.g. enhanced-message-parser reset+reparse) must NOT
+    // write again — executed stays true.
+    await runner.runAction(data, false);
+    await runner.runAction(data, true);
+
+    expect(fs.writeFile).toHaveBeenCalledTimes(1);
   });
 });
