@@ -69,10 +69,22 @@ export const BuildErrorCard = memo(({ command, error, source, attempt, maxAttemp
           ) : null}
           <span className="ml-auto text-[10px] uppercase tracking-[0.15em] text-red-300/40">{sourceLabel}</span>
         </div>
+        {/* Raw error dump collapsed behind a closed <details> by default — the
+            user only ever sees "Build error · fixing it" unless they explicitly
+            expand. Never surface console logs unprompted (per UX hardening
+            2026-07-05). */}
         {cleaned ? (
-          <pre className="mt-2 max-h-[280px] overflow-auto rounded-lg bg-[#0A0A09] p-2 font-mono text-[11.5px] leading-relaxed text-red-100/70 whitespace-pre-wrap break-words">
+          <details className="mt-2 group/details">
+            <summary className="cursor-pointer text-[10px] uppercase tracking-[0.15em] text-red-300/40 hover:text-red-300/70 transition-colors list-none select-none">
+              <span className="inline-flex items-center gap-1">
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="transition-transform duration-200 group-open/details:rotate-90"><polyline points="9 18 15 12 9 6" /></svg>
+                Show error details
+              </span>
+            </summary>
+            <pre className="mt-2 max-h-[280px] overflow-auto rounded-lg bg-[#0A0A09] p-2 font-mono text-[11.5px] leading-relaxed text-red-100/70 whitespace-pre-wrap break-words">
 {cleaned}
-          </pre>
+            </pre>
+          </details>
         ) : null}
         {showFixing ? (
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#E8601A]/80">

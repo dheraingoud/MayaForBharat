@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type PropsWithChildren } from 'react';
+import { Loader2 } from 'lucide-react';
 
 interface ThoughtBoxProps {
   title?: string;
@@ -67,8 +68,13 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
         type="button"
         aria-expanded={isExpanded}
       >
-        {/* Brain icon — gentle pulse while thinking, static when done (no emoji) */}
-        <div className={`i-ph:brain w-3 h-3 thought-sparkle ${isStreaming ? 'brain-pulse' : ''}`} />
+        {/* vercel reasoning.tsx trigger icon: Loader2 spinner while thinking,
+            static when done. Inline, monospace-baseline, Maya-orange. */}
+        <Loader2
+          className={`thought-sparkle ${isStreaming ? 'thought-spinner' : 'thought-spinner-static'}`}
+          size={12}
+          strokeWidth={2.25}
+        />
 
         {/* Label — vercel ReasoningTrigger: "Thinking..." while streaming,
             "Thought for Ns" when done. Bilingual. */}
@@ -175,19 +181,23 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
           border-color: rgba(232,96,26,0.15);
         }
 
-        /* ─── Brain icon ─── */
+        /* ─── Spinner icon (Loader2) ─── */
         .thought-sparkle {
           position: relative;
           z-index: 1;
           flex-shrink: 0;
           transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .brain-pulse {
-          animation: brain-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        .thought-spinner {
+          animation: thought-spin 0.9s linear infinite;
         }
-        @keyframes brain-pulse {
-          0%, 100% { transform: scale(1); opacity: 0.9; }
-          50% { transform: scale(1.18); opacity: 1; }
+        .thought-spinner-static {
+          /* done — no spin, just sits as a quiet marker */
+          animation: none;
+        }
+        @keyframes thought-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
 
         /* ─── Label — stays in place, text changes ─── */

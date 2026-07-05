@@ -447,3 +447,21 @@
   animation: maya-pulse-dot 1.4s var(--ease-premium) infinite;
 }
 
+/* Maya stream cursor — vercel-chatbot blinking dot at the end of a streaming
+   assistant reply. Reassures the user the model is alive (not dead/hung)
+   without a noisy spinner. Inline, monospace baseline-aligned, Maya-orange. */
+@keyframes maya-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.maya-stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: #E8601A;
+  animation: maya-blink 1s steps(2, start) infinite;
+}
+

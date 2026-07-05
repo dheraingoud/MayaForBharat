@@ -22,6 +22,21 @@ describe('stripMetadata — auto-fix breadcrumb collapse (F2)', () => {
     expect(out).toBe('');
   });
 
+  // F2+auto-run leak (2026-07-05): BuilderPage L869 emits a DISTINCT breadcrumb
+  // — "fixing a preview that didn't load" (not "fixing a preview error") — with
+  // MAX_AUTO_RUN_CYCLES=3 (not 15). The original regex matched only "preview
+  // error", so this variant leaked through as a FAKE USER BUBBLE in chat. Guard
+  // both the wording variant AND the smaller N/M cap.
+  it('strips "MAYA is fixing a preview that didn\'t load (attempt N/M)…" (auto-run variant)', () => {
+    const out = stripMetadata("MAYA is fixing a preview that didn't load (attempt 1/3)…");
+    expect(out).toBe('');
+  });
+
+  it('strips "MAYA is fixing a preview that didn\'t load (attempt N/M)." trailing-period variant', () => {
+    const out = stripMetadata("MAYA is fixing a preview that didn't load (attempt 2/3). ");
+    expect(out).toBe('');
+  });
+
   it('strips "MAYA is continuing the build (attempt N/M)…"', () => {
     const out = stripMetadata('MAYA is continuing the build (attempt 3/15)…');
     expect(out).toBe('');

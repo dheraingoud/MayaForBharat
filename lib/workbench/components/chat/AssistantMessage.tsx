@@ -18,7 +18,6 @@ import type { ToolCallAnnotation } from '@/lib/workbench/types/context';
 import ThoughtBox from './ThoughtBox';
 import { BuildErrorCard } from './BuildErrorCard';
 import { MessageActions } from './MessageActions';
-import { SparklesIcon } from 'lucide-react';
 
 interface AssistantMessageProps {
   content: string;
@@ -124,12 +123,9 @@ export const AssistantMessage = memo(
 
     return (
       <div className="group/message overflow-hidden w-full flex items-start gap-3">
-        {/* vercel-chatbot Message style: small avatar (Maya orange Sparkles) then
-            content + actions below. group/message drives hover-reveal of
-            MessageActions. */}
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#1A1917] ring-1 ring-white/[0.06]">
-          <SparklesIcon size={13} className="text-[#E8601A]" />
-        </div>
+        {/* vercel-chatbot Message style: NO assistant avatar in chat (only the
+            user side has one). Assistant content sits at the left edge with the
+            toolbar below; group/message drives hover-reveal of MessageActions. */}
         <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm text-[#D4D0CA]">
             {/* ─── Interleaved rendering: thinking → response → thinking → response ─── */}
             {/* Renders parts in chronological order for a progressive experience */}
@@ -194,6 +190,13 @@ export const AssistantMessage = memo(
                         <Markdown isStreaming={isStreaming && isLastTextGroup}>
                           {renderContent}
                         </Markdown>
+                        {/* vercel-chatbot blinking cursor: sits at the lowest
+                            part of the streaming reply so the user can see the
+                            model is alive (not dead/hung). Maya-orange blink,
+                            only on the last text group while streaming. */}
+                        {isStreaming && isLastTextGroup && (
+                          <span className="maya-stream-cursor" aria-hidden="true" />
+                        )}
                       </Fragment>
                     );
                   }

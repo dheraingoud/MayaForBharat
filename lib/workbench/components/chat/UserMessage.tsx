@@ -248,7 +248,7 @@ export function stripMetadata(content: string) {
   // the empty-textContent guards in the render paths below). The LLM still
   // sees the real error context via pipelineInstructionsRef (server-injected),
   // so the fix loop still triggers; only the visible bubble dies.
-  const autoFixPreambleRegex = /(?:\*Auto-fix attempt\s+\d+\/\d+[^*]*\*|MAYA is (?:fixing a (?:terminal|preview) error|continuing the build) \(attempt\s+\d+\/\d+\)[^]*?(?:…|\.)\s*)/g;
+  const autoFixPreambleRegex = /(?:\*Auto-fix attempt\s+\d+\/\d+[^*]*\*|MAYA is (?:fixing a (?:terminal|preview)(?: error| that didn't load)?|continuing the build) \(attempt\s+\d+\/\d+\)[^]*?(?:…|\.)\s*)/g;
   // Strip ANSI color escapes that WebContainer terminal dumps can carry.
   const ansiRegex = /\x1b\[[0-9;]*[A-Za-z]/g;
   const planContextRegex = /\n*---\s*APP PLAN.*?---\s*END PLAN\s*---.*?architecture\./gs;
