@@ -108,6 +108,11 @@ const ActionList = memo(({ actions }: ActionListProps) => {
               transition={{
                 duration: 0.2,
                 ease: cubicEasingFn,
+                // Stagger mount so files arriving in the same parse tick (50ms
+                // sampler → React batches multiple onActionOpen into one render)
+                // still fade-up one-after-another instead of popping together.
+                // Matches Messages.client per-message delay curve.
+                delay: Math.min(index * 0.04, 0.4),
               }}
             >
               <div className="flex items-center gap-1.5 text-[13px] text-[#9E9890]">
