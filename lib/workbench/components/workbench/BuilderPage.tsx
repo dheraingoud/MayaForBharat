@@ -839,7 +839,19 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
     // Start 30s timeout — if no preview appears, auto-send diagnostic
     if (autoRunAttemptsRef.current >= MAX_AUTO_RUN_CYCLES) {
-      logger.warn('[PreviewHealth] Max auto-run cycles reached, not retrying')
+      logger.warn('[PreviewHealth] Max auto-run cycles reached, surfacing give-up')
+      // Gap C: graceful degradation instead of a silent stall. attempt=0/
+      // maxAttempts=0 → BuildErrorCard renders its "Auto-fix unable to resolve"
+      // fallback (BuildErrorCard.tsx L97-107), per CLAUDE.md "never 502 the
+      // user; fallback labeled". Idempotent atom set — re-fires on effect
+      // re-runs are harmless (same content; only renders on last assistant msg).
+      workbenchStore.buildErrorCard.set({
+        command: '(preview-health)',
+        error: `No preview after ${MAX_AUTO_RUN_CYCLES} auto-run cycles. The dev server may be crashing silently — use the retry button or inspect the terminal.`,
+        source: 'preview',
+        attempt: 0,
+        maxAttempts: 0,
+      })
       return
     }
 
