@@ -17,6 +17,7 @@ import { forwardRef, useState } from 'react';
 import type { ForwardedRef } from 'react';
 import { motion } from 'framer-motion';
 import type { ProviderInfo } from '@/lib/workbench/types/model';
+import { useLanguage } from '@/app/providers';
 
 // Match the parts union expected by UserMessage / AssistantMessage props.
 // `ai` v6's UIMessage.parts uses the generic `ToolUIPart<TOOLS>` (matched as
@@ -50,6 +51,10 @@ interface MessagesProps {
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
   (props: MessagesProps, ref: ForwardedRef<HTMLDivElement> | undefined) => {
     const { id, isStreaming = false, messages = [] } = props;
+  // App-wide language provider drives the empty-state Greeting locale (no user
+  // msg exists yet to per-message-detect from). Per-message language below
+  // re-derives from the nearest user msg as the conversation proceeds.
+  const { language: appLanguage } = useLanguage();
 
     // ── M2: in-place user-message edit. Idempotent client-side
     //    deleteTrailingMessages approximation — drop edited msg + trailing,
@@ -97,13 +102,18 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
 
     return (
       <div id={id} className={props.className} ref={ref}>
-        {/* Phase R: centered reading column. Breathing room, fade-up enter. */}
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 relative">
+        {/* Phase R: centered reading column. Breathing room, fade-up enter.
+            Width cap comes from the outer Messages props.className
+            (`max-w-chat` = --chat-max-width 33rem, set in BaseChat L379);
+            this inner div only supplies gutters + the `relative` anchor for
+            the absolute Greeting empty-state overlay. (Prior `max-w-3xl`
+            was a dead no-op — 48rem > 33rem outer, never bound.) */}
+        <div className="mx-auto px-4 sm:px-6 py-6 relative">
         {/* M2: empty-state greeting — ported vercel greeting.tsx overlay.
             Absolute centered, pointer-events-none so the composer keeps focus. */}
         {messages.length === 0 && !isStreaming && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-            <Greeting language="en" />
+            <Greeting language={appLanguage} />
           </div>
         )}
         {messages.length > 0
