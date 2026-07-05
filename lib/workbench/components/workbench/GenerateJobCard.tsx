@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, X, CheckCircle2 } from 'lucide-react';
+import { Loader2, AlertTriangle, X, CheckCircle2, Wrench } from 'lucide-react';
 import type {
   GenerateJobStatus,
   GenerateJobView,
@@ -88,30 +88,59 @@ export function GenerateJobCard({
       aria-label={StatusLabel(job.status)}
       data-app-id={appId}
       data-job-status={job.status}
-      className="flex flex-col items-center justify-center h-full gap-4 bg-[#111110] text-white px-6 text-center"
+      className="flex flex-col items-center justify-center h-full gap-4 bg-[#111110] text-[#F5F4F0] px-6 text-center"
     >
           {inFlight ? (
             <>
+              {/* vercel Tool aesthetic: header row (wrench + title + status pill) */}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#1A1917] ring-1 ring-white/[0.06]">
+                <Wrench size={13} className="text-[#E8601A]" />
+                <span className="text-xs font-medium text-[#F5F4F0]">Building on Convex</span>
+                <span className="inline-flex items-center gap-1.5 ml-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#E8601A]/12 text-[#E8601A] ring-1 ring-[#E8601A]/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-pulse" />
+                  {job.status === 'building' ? 'Building' : 'Pending'}
+                </span>
+              </div>
+
               <Loader2 className="w-8 h-8 animate-spin text-[#E8601A]" aria-hidden="true" />
-              <h2 className="text-lg font-medium">{StatusLabel(job.status)}</h2>
+              <h2 className="text-lg font-medium text-[#F5F4F0]">{StatusLabel(job.status)}</h2>
               {note ? (
-                <p className="text-xs text-white/55">
+                <p className="text-xs text-[#9E9890]">
                   {String(note)}
                </p>
               ) : null}
-              <p className="text-xs text-white/30">
+              <p className="text-xs text-[#3A3835] font-mono">
                 elapsed &middot; {fmtElapsed(elapsed)}
              </p>
               {job.transientJob && job.transientJob.progressNote ? (
-                <p className="text-[10px] text-white/25 max-w-md">
+                <p className="text-[10px] text-[#3A3835] max-w-md font-mono">
                   subscriber {String(job.transientJob._id ?? '').slice(-6) || ''}: {job.transientJob.progressNote}
                </p>
               ) : null}
+
+              {/* file-write list from job.files (progressive writes shown) */}
+              {job.files && job.files.length > 0 ? (
+                <div className="w-full max-w-lg mt-2 flex flex-col gap-1.5 text-left">
+                  {job.files.map((f, i) => (
+                    <div
+                      key={`${f.path}-${i}`}
+                      className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-[#1A1917]/50 px-2.5 py-1.5"
+                    >
+                      <span className="inline-flex items-center justify-center shrink-0 h-5 w-5 rounded-md bg-[#E8601A]/12 text-[#E8601A] text-[9px] font-bold uppercase">
+                        {f.path.split('.').pop()?.slice(0, 2) ?? 'f'}
+                      </span>
+                      <code className="flex-1 min-w-0 truncate font-mono text-xs text-[#D4D0CA]">{f.path}</code>
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#2D7A4F]" aria-label="written" />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               <button
                 onClick={() => {
                   void onCancel();
                 }}
-                className="mt-2 text-xs text-white/55 hover:text-white underline"
+                className="mt-2 text-xs text-[#9E9890] hover:text-[#F5F4F0] underline underline-offset-2"
               >
                 Cancel build
              </button>
@@ -120,15 +149,15 @@ export function GenerateJobCard({
 
           {job.status === 'error' ? (
             <>
-              <AlertTriangle className="w-9 h-9 text-red-500" aria-hidden="true" />
-              <h2 className="text-lg font-medium">{StatusLabel(job.status)}</h2>
+              <AlertTriangle className="w-9 h-9 text-[#F87171]" aria-hidden="true" />
+              <h2 className="text-lg font-medium text-[#F5F4F0]">{StatusLabel(job.status)}</h2>
               {note ? (
-                <p className="text-xs text-white/55">
+                <p className="text-xs text-[#9E9890]">
                   {String(note)}
                </p>
               ) : null}
               {job.error ? (
-                <p className="text-xs text-white/40 max-w-md break-words">
+                <p className="text-xs text-[#6B6560] max-w-md break-words">
                   {job.error}
                </p>
               ) : null}
@@ -136,7 +165,7 @@ export function GenerateJobCard({
                 onClick={() => {
                   void onRetry();
                 }}
-                className="mt-2 text-sm bg-[#E8601A] hover:bg-[#FF6E1F] px-4 py-2 rounded font-medium"
+                className="mt-2 text-sm bg-[#E8601A] hover:bg-[#FF6E1F] px-4 py-2 rounded-lg font-medium text-[#111110] active:scale-95 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
               >
                 Retry build
              </button>
@@ -145,10 +174,10 @@ export function GenerateJobCard({
 
           {job.status === 'cancelled' ? (
             <>
-              <X className="w-9 h-9 text-white/45" aria-hidden="true" />
-              <h2 className="text-lg font-medium">{StatusLabel(job.status)}</h2>
+              <X className="w-9 h-9 text-[#6B6560]" aria-hidden="true" />
+              <h2 className="text-lg font-medium text-[#F5F4F0]">{StatusLabel(job.status)}</h2>
               {note ? (
-                <p className="text-xs text-white/40">
+                <p className="text-xs text-[#9E9890]">
                   {String(note)}
                </p>
               ) : null}
@@ -156,7 +185,7 @@ export function GenerateJobCard({
                 onClick={() => {
                   void onBuild();
                 }}
-                className="mt-2 text-sm bg-[#E8601A] hover:bg-[#FF6E1F] px-4 py-2 rounded font-medium"
+                className="mt-2 text-sm bg-[#E8601A] hover:bg-[#FF6E1F] px-4 py-2 rounded-lg font-medium text-[#111110] active:scale-95 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
               >
                 Build now
              </button>
@@ -164,7 +193,7 @@ export function GenerateJobCard({
           ) : null}
 
 
-      <p className="text-[10px] text-white/20 mt-4">
+      <p className="text-[10px] text-[#3A3835] mt-4 font-mono">
         job {job._id?.slice(-8) ?? '-'} &middot; app {appId.slice(0, 8)}
     </p>
    </div>
@@ -174,7 +203,7 @@ export function GenerateJobCard({
 /** Tiny success banner used right before the workbench unmounts this card. */
 export function GeneratingSuccessBanner({ fileCount }: { fileCount: number }) {
   return (
-    <div className="flex items-center gap-2 text-xs text-emerald-300 px-4 py-2 bg-emerald-900/20 border-b border-emerald-700/30">
+    <div className="flex items-center gap-2 text-xs text-[#2D7A4F] px-4 py-2 bg-[#2D7A4F]/10 border-b border-[#2D7A4F]/25">
       <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
       <span>
         Build complete &middot; {fileCount} file{fileCount === 1 ? '' : 's'} loaded
