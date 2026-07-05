@@ -12,49 +12,57 @@ interface ThoughtBoxProps {
 // The reasoning content itself is buffered (never streamed live in the pill);
 // the optional chevron reveals the buffered text on click, never live.
 const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: PropsWithChildren<ThoughtBoxProps>) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // vercel reasoning.tsx state machine: default open when streaming, auto-open
+  // on stream start, auto-close 1000ms after stream ends (once only, regardless
+  // of user toggle). Duration tracked from stream start to end.
+  const [isExpanded, setIsExpanded] = useState(isStreaming);
   const [thinkDuration, setThinkDuration] = useState(0);
-  const startTimeRef = useRef(Date.now());
-  // Track if we ever had a streaming phase (prevents 0s display)
+  const startTimeRef = useRef<number | null>(null);
   const wasStreamingRef = useRef(false);
-  // Auto-close gate (vercel reasoning.tsx pattern): collapse ~1s after
-  // stream ends, once only, never re-trigger. User can re-expand freely.
   const hasAutoClosedRef = useRef(false);
-  // Did the user explicitly expand mid-stream? If so, still auto-collapse
-  // (vercel does) — but we keep the manual toggle fully responsive after.
-  const userToggledRef = useRef(false);
 
+  // Track streaming start + compute duration on end (vercel reasoning.tsx:88-98)
   useEffect(() => {
     if (isStreaming) {
       wasStreamingRef.current = true;
-      startTimeRef.current = Date.now();
+      if (startTimeRef.current === null) {
+        startTimeRef.current = Date.now();
+      }
       const interval = setInterval(() => {
-        setThinkDuration(Math.round((Date.now() - startTimeRef.current) / 1000));
+        if (startTimeRef.current !== null) {
+          setThinkDuration(Math.ceil((Date.now() - startTimeRef.current) / 1000));
+        }
       }, 1000);
       return () => clearInterval(interval);
-    } else if (wasStreamingRef.current) {
-      // Freeze duration when streaming stops
-      setThinkDuration(prev => prev || Math.round((Date.now() - startTimeRef.current) / 1000) || 1);
-      // Auto-collapse ~1s post-stream, once only (vercel AUTO_CLOSE_DELAY=1000).
-      // Respect an explicit user toggle during stream: if user opened it
-      // themselves mid-stream, leave it open for them to read.
-      if (!hasAutoClosedRef.current && !userToggledRef.current && isExpanded) {
-        hasAutoClosedRef.current = true;
-        const t = setTimeout(() => setIsExpanded(false), 1000);
-        return () => clearTimeout(t);
-      }
-      hasAutoClosedRef.current = true;
+    } else if (startTimeRef.current !== null) {
+      setThinkDuration(Math.ceil((Date.now() - startTimeRef.current) / 1000));
+      startTimeRef.current = null;
     }
-  }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isStreaming]);
+
+  // Auto-open when streaming starts (vercel reasoning.tsx:101-105)
+  useEffect(() => {
+    if (isStreaming && !isExpanded) {
+      setIsExpanded(true);
+    }
+  }, [isStreaming, isExpanded]);
+
+  // Auto-close 1000ms after stream ends, once only (vercel reasoning.tsx:108-122)
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming && isExpanded && !hasAutoClosedRef.current) {
+      const t = setTimeout(() => {
+        setIsExpanded(false);
+        hasAutoClosedRef.current = true;
+      }, 1000);
+      return () => clearTimeout(t);
+    }
+  }, [isStreaming, isExpanded]);
 
   return (
     <div className="thought-box-root">
       {/* The pill — transitions IN PLACE from "Thinking..." → "Thought for Xs" */}
       <button
-        onClick={() => {
-          userToggledRef.current = true;
-          setIsExpanded(!isExpanded);
-        }}
+        onClick={() => setIsExpanded(!isExpanded)}
         className={`thought-pill ${isStreaming ? 'thought-pill-active' : 'thought-pill-done'}`}
         type="button"
         aria-expanded={isExpanded}
@@ -62,17 +70,15 @@ const ThoughtBox = ({ title, children, isStreaming = false, language = 'en' }: P
         {/* Brain icon — gentle pulse while thinking, static when done (no emoji) */}
         <div className={`i-ph:brain w-3 h-3 thought-sparkle ${isStreaming ? 'brain-pulse' : ''}`} />
 
-        {/* Label — only when done ("Thought for Xs"). During streaming the
-            DynamicStatusPill owns the "Reasoning" headline, so this pill is
-            just the brain icon + chevron affordance (click to expand). */}
-        {!isStreaming && (
-          <span className="thought-label">
-            {language === 'hi' ? `${thinkDuration || 1} sec mein socha` : `Thought for ${thinkDuration || 1}s`}
-          </span>
-        )}
+        {/* Label — vercel ReasoningTrigger: "Thinking..." while streaming,
+            "Thought for Ns" when done. Bilingual. */}
+        <span className="thought-label">
+          {isStreaming
+            ? (language === 'hi' ? 'Soch rahi hoon...' : 'Thinking...')
+            : (language === 'hi' ? `${thinkDuration || 1} sec mein socha` : `Thought for ${thinkDuration || 1}s`)}
+        </span>
 
-        {/* Chevron — always visible so the buffered reasoning is expandable
-            mid-stream too (content is buffered, safe to reveal live). */}
+        {/* Chevron — always visible, rotates when expanded (vercel pattern). */}
         <svg
           width="10"
           height="10"

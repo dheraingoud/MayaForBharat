@@ -1,5 +1,4 @@
 import { memo, Fragment, useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
 import { Markdown } from './Markdown';
 import type { JSONValue } from 'ai';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
@@ -123,38 +122,10 @@ export const AssistantMessage = memo(
     }, [showBuildError]);
 
     return (
-      <div className="overflow-hidden w-full">
-        {/* ─── v0-style: MAYA avatar + content row ─── */}
-        <div className="flex gap-3 items-start">
-          {/* MAYA avatar — double-bezel (hairline ring + inset highlight, no neon glow) */}
-          <motion.div
-            className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5 ring-1 ring-[#E8601A]/20"
-            style={{
-              background: 'linear-gradient(135deg, #E8601A 0%, #C94E12 100%)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
-            }}
-            animate={{ scale: isStreaming ? 1.04 : 1 }}
-            transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-          >
-            <span className="text-white text-[9px] font-bold tracking-tight">M</span>
-          </motion.div>
-
-          {/* Message content area */}
-          <div className="flex-1 min-w-0">
-            {/* M2: hover-reveal action bar (vercel message-actions port, MAYA
-                tokens + Phosphor). Replaces the lone rewind button — rewind
-                is now one of the actions. Hidden while streaming. */}
-            {messageId && !isStreaming && (
-              <MessageActions
-                role="assistant"
-                messageId={messageId}
-                parts={parts}
-                isLoading={isStreaming}
-                onRewind={onRewind ? () => onRewind(messageId) : undefined}
-                language={language}
-              />
-            )}
-
+      <div className="group/message overflow-hidden w-full">
+        {/* vercel-chatbot Message style: no avatar, content then actions below.
+            group/message drives hover-reveal of MessageActions. */}
+        <div className="flex-1 min-w-0">
             {/* ─── Interleaved rendering: thinking → response → thinking → response ─── */}
             {/* Renders parts in chronological order for a progressive experience */}
             {/* Phase R2: inline streaming status pill + cursor blink deleted — */}
@@ -202,6 +173,22 @@ export const AssistantMessage = memo(
                     // Check if this is the last text group (for streaming cursor)
                     const isLastTextGroup = gi === groups.length - 1 ||
                       groups.slice(gi + 1).every(g => g.type !== 'text');
+                    // Render the FIRST text group from the StreamingMessageParser's
+                    // parsed body (displayContent) — the parser converts <boltArtifact>
+                    // XML into <div class="__boltArtifact__"> placeholders, which
+                    // Markdown's div-router (Markdown.tsx:34-50) mounts as <Artifact>
+                    // cards. Rendering raw `parts.text` instead hits rehypeStripBoltTags
+                    // (markdown.ts:52-65) which strips raw bolt hast nodes → no cards.
+                    // Subsequent text groups are skipped: displayContent is the FULL
+                    // parsed message so it already contains their prose. Parser runs on
+                    // a 50ms sampler (useMessageParser), so displayContent is at most
+                    // ~50ms stale — fall back to raw textContent during that gap so
+                    // streaming prose stays live.
+                    const isFirstTextGroup = groups.slice(0, gi).every(g => g.type !== 'text');
+                    if (!isFirstTextGroup) return null;
+                    const renderContent = (displayContent && displayContent.trim().length > 0)
+                      ? displayContent
+                      : textContent;
                     return (
                       <Fragment key={`text-${gi}`}>
                         <Markdown
@@ -213,7 +200,7 @@ export const AssistantMessage = memo(
                           isStreaming={isStreaming && isLastTextGroup}
                           html
                         >
-                          {textContent}
+                          {renderContent}
                         </Markdown>
                       </Fragment>
                     );
@@ -271,8 +258,11 @@ export const AssistantMessage = memo(
                 in the AIDA flow between Desire (tool cards) and Action. */}
             {!isStreaming && buildError ? <BuildErrorCard {...buildError} /> : null}
 
-            {/* Empty response warning — double-bezel alert, bilingual */}
-            {!isStreaming && !hasContent && !hasReasoning && !(toolInvocations && toolInvocations.length > 0) && messageId && (
+            {/* Empty response warning — double-bezel alert, bilingual.
+                Fires when the model emitted no visible text answer, whether it
+                produced only reasoning (thought-but-no-answer) or nothing at all.
+                Tool-only turns don't trigger it — those are real build steps. */}
+            {!isStreaming && !hasContent && !(toolInvocations && toolInvocations.length > 0) && messageId && (
               <div
                 className="flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] ring-1 ring-red-400/15"
                 style={{
@@ -283,12 +273,32 @@ export const AssistantMessage = memo(
               >
                 <div className="i-ph:warning-circle w-3.5 h-3.5 shrink-0" />
                 <span>{language === 'hi'
-                  ? 'MAYA ne khaali jawaab diya. Dobara bhejiye ya doosra model try karein.'
-                  : 'Model returned an empty response. Try sending the message again or switch to a different model.'}</span>
+                  ? (hasReasoning
+                    ? 'MAYA ne sirf socha, lekin koi jawaab nahi diya. Dobara bhejiye ya doosra model try karein.'
+                    : 'MAYA ne khaali jawaab diya. Dobara bhejiye ya doosra model try karein.')
+                  : (hasReasoning
+                    ? 'Model only produced reasoning and no final answer. Try sending again or switch to a different model.'
+                    : 'Model returned an empty response. Try sending the message again or switch to a different model.')}</span>
+              </div>
+            )}
+
+            {/* vercel-chatbot MessageToolbar pattern: actions BELOW content.
+                mt-4 spacing, hover-reveal via group-message. Only after the
+                response terminates (isStreaming false). Copy, rewind, cosmetic
+                vote (no vote-table persistence in MAYA). */}
+            {messageId && !isStreaming && (
+              <div className="mt-4">
+                <MessageActions
+                  role="assistant"
+                  messageId={messageId}
+                  parts={parts}
+                  isLoading={isStreaming}
+                  onRewind={onRewind ? () => onRewind(messageId) : undefined}
+                  language={language}
+                />
               </div>
             )}
           </div>
-        </div>
       </div>
     );
   },

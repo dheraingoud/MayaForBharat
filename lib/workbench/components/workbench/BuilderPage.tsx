@@ -58,7 +58,12 @@ import { TerminalTabs } from '@/lib/workbench/components/workbench/terminal/Term
 import { StickToBottom, useStickToBottomContext } from '@/lib/workbench/hooks'
 import { ClientOnly } from '@/lib/workbench/components/ui/ClientOnly'
 import ChatAlert from '@/lib/workbench/components/chat/ChatAlert'
-import ProgressCompilation from '@/lib/workbench/components/chat/ProgressCompilation'
+// ProgressCompilation import removed — floating build-progress island killed;
+// per-file git-diff rows in <Artifact> (lib/workbench/components/chat/Artifact.tsx)
+// are the single source of build progress.
+// ProgressAnnotation type still used by the progressAnnotations state below;
+// the <ProgressCompilation> mount was removed but the derive poll feeds the
+// (now-unused) state — kept to avoid broader surgery. Type import stays.
 import type { ProgressAnnotation } from '@/lib/workbench/types/context'
 import { DeployButton } from '@/lib/workbench/components/deploy/DeployButton'
 
@@ -484,7 +489,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   const appIdRef = useRef<string | null>(appId || null) // Stable ID — never changes once set
   const hasSavedRef = useRef(!!appId) // If we have an appId from props, the app already exists
   const autoRunAttemptsRef = useRef(0)
-  const MAX_AUTO_RUN_CYCLES = 12 // Bulletproof: don't stop until 1st version is complete
+  const MAX_AUTO_RUN_CYCLES = 3 // Stop early — fatal rebuild cascade if the fix doesn't land
   const incrementalSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── Helper: extract messages in Convex-friendly format ──
@@ -649,10 +654,11 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       // ActionCallbackData shape + execution path the streaming parser uses
       // (useMessageParser onActionClose → workbenchStore.addAction/runAction).
       const synthMessageId = `autorun-${Date.now()}`
+      // Dev loop only — no `npm run build` (Vite dev transpiles TS without
+      // type-checking, so a production build gate would re-fail on tsc errors
+      // and trigger a fatal auto-fix rebuild cascade). Preview loads from dev.
       const pipeline: { type: 'shell' | 'start'; content: string }[] = [
         { type: 'shell', content: 'npm install' },
-        { type: 'shell', content: 'npm run build' },
-        { type: 'shell', content: 'npx vitest run --reporter=verbose 2>&1 || true' },
         { type: 'start', content: 'npm run dev' },
       ]
       setTimeout(() => {
@@ -743,12 +749,9 @@ export function BuilderPage({ appId }: BuilderPageProps) {
           ? `A preview runtime error occurred (attempt ${attempt}/${maxAttempts}). Error detail:\n\n\`\`\`\n${errorSnippet}\n\`\`\``
           : `The command \`${command}\` failed (attempt ${attempt}/${maxAttempts}). Terminal output:\n\n\`\`\`sh\n${errorSnippet}\n\`\`\``,
         '',
-        'Fix the underlying source files causing this error, then re-emit the artifact using your standard bolt action format so the changes apply. After fixing, include the full pipeline:',
-        '1. install dependencies',
-        '2. build the project',
-        '3. run tests (non-blocking)',
-        '4. start the dev server',
-        'Reduce all errors to zero. Do not explain — emit the artifact directly.',
+        'Fix ONLY the broken source files causing this error. Re-emit only the corrected files in bolt action file tags.',
+        'Do NOT re-run npm install, npm run build, tests, or npm run dev — the dev server is already running and will hot-reload your fix automatically.',
+        'Do not explain — emit only the corrected source files directly.',
       ].join('\n')
 
 
@@ -868,12 +871,9 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         '',
         `The dev server was started but no preview appeared after 30 seconds (auto-diagnostic attempt ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES}). This usually means a compilation error or the dev server crashed silently.`,
         '',
-        'Inspect the code for import errors (missing modules, wrong paths), syntax errors, missing dependencies in package.json, and TypeScript type errors. Fix the underlying source files, then re-emit the artifact using your standard bolt action format so the changes apply. After fixing, include the full pipeline:',
-        '1. install dependencies',
-        '2. build the project',
-        '3. run tests (non-blocking)',
-        '4. start the dev server',
-        'Reduce all errors to zero. Do not explain — emit the artifact directly.',
+        'Inspect the code for import errors (missing modules, wrong paths), syntax errors, missing dependencies in package.json. Fix ONLY the broken source files, re-emit only the corrected files in bolt action file tags.',
+        'Do NOT re-run npm install, npm run build, tests, or npm run dev — the dev server is already running and will hot-reload your fix automatically.',
+        'Do not explain — emit only the corrected source files directly.',
       ].join('\n')
 
       // Surface the styled in-chat error card (Phase B). source='preview'
@@ -1191,7 +1191,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
     // 4. chatSendMessage will create the user message AND trigger the API call
     // Use resolvedModel/resolvedProvider (from URL tier) instead of stale state
-    const pipelineInst = `\n\n--- MANDATORY BUILD PIPELINE (run in exact order, never skip a step) ---\nAfter writing ALL source files, execute this EXACT sequence in boltAction shell/start tags:\n1. \`<boltAction type=\"shell\">npm install</boltAction>\`\n2. \`<boltAction type=\"shell\">npm run build</boltAction>\`\n3. \`<boltAction type=\"shell\">npx vitest run --reporter=verbose 2>&amp;1 || true</boltAction>\`\n4. \`<boltAction type=\"start\">npm run dev</boltAction>\`\n\nYou MUST NOT stop or explain anything until all 4 steps have completed. The first version is not done until build passes, tests pass, dev server starts, and all pages render correctly.`
+    const pipelineInst = `\n\n--- MANDATORY DEV LOOP (run in exact order, never skip a step) ---\nAfter writing ALL source files, execute this EXACT sequence in boltAction shell/start tags:\n1. \`<boltAction type=\"shell\">npm install</boltAction>\`\n2. \`<boltAction type=\"start\">npm run dev</boltAction>\`\n\nYou MUST NOT stop or explain anything until the dev server has started and all pages render correctly. Do NOT run \`npm run build\` or any test runner (vitest, jest) — the Vite dev server compiles TypeScript on the fly without type-checking, so a production build is unnecessary for the preview and risks a fatal re-build loop on every reload.`
     const apiUserText = `[Model: ${resolvedModel}]\n\n[Provider: ${resolvedProvider}]\n\n${prompt}${planContext}${pipelineInst}`
 
     //
@@ -1743,7 +1743,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         ) : (
           /* ── DESKTOP ───────────────────────────────────────────────── */
           <ResizablePanelGroup direction="horizontal" className="h-full">
-            <ResizablePanel defaultSize={30} minSize={18} maxSize={50}>
+            <ResizablePanel defaultSize={42} minSize={28} maxSize={62}>
               <ChatPanel
                 messages={displayMessages} setMessages={setMessages} isStreaming={isLoading || fakeLoading}
                 input={input} handleInputChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { handleInputChange(e); debouncedCachePrompt(e) }}
@@ -1765,7 +1765,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
             <ResizableHandle />
 
-            <ResizablePanel defaultSize={70}>
+            <ResizablePanel defaultSize={58} minSize={38}>
               <PanelGroup direction="vertical" className="h-full">
                 <Panel defaultSize={75} minSize={30}>
                   <WorkbenchPreview viewport={viewport} viewportSetter={setViewport} />
@@ -1999,11 +1999,6 @@ const ChatPanel = memo((
             />
           </div>
         )}
-        {progressAnnotations.length > 0 && (
-          <div className="pointer-events-auto w-full max-w-3xl">
-            <ProgressCompilation data={progressAnnotations} />
-          </div>
-        )}
       </div>
       </div>
 
@@ -2013,7 +2008,7 @@ const ChatPanel = memo((
       {/* ── Input bar ── */}
       <div
         className="shrink-0 bg-[#1A1917]/85 backdrop-blur-[12px]"
-        style={{ maskImage: 'linear-gradient(to bottom, transparent, black 28px)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 28px)' }}
+        style={{ maskImage: 'linear-gradient(to bottom, transparent, black 36px)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 36px)' }}
       >
         <div className="px-3 py-3">
           <div className="bg-[#222120] rounded-2xl ring-1 ring-white/[0.05] focus-within:ring-[#E8601A]/20 transition-all">

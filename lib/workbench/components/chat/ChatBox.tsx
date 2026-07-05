@@ -30,6 +30,9 @@ interface ChatBoxProps {
   TEXTAREA_MIN_HEIGHT: number;
   TEXTAREA_MAX_HEIGHT: number;
   isStreaming: boolean;
+  /** vercel ChatStatus enum — drives the 4-state submit button. Omitted →
+   *  SendButton falls back to the legacy isStreaming boolean. */
+  status?: 'ready' | 'submitted' | 'streaming' | 'error';
   handleSendMessage: (event: React.UIEvent, messageInput?: string) => void;
   isListening: boolean;
   startListening: () => void;
@@ -217,8 +220,10 @@ export const ChatBox: React.FC<ChatBoxProps> = (props) => {
             {() => (
               <SendButton
                 show={props.input.length > 0 || props.isStreaming || props.uploadedFiles.length > 0}
+                status={props.status}
                 isStreaming={props.isStreaming}
                 disabled={!props.providerList || props.providerList.length === 0}
+                onStop={props.handleStop}
                 onClick={(event) => {
                   if (props.isStreaming) {
                     props.handleStop?.();

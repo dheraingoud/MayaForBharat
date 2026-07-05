@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { useStore } from '@nanostores/react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { computed } from 'nanostores';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo } from 'react';
 import { createHighlighter, type BundledLanguage, type BundledTheme, type HighlighterGeneric } from 'shiki';
 import type { ActionState } from '@/lib/workbench/runtime/action-runner';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
@@ -28,10 +28,6 @@ interface ArtifactProps {
 }
 
 export const Artifact = memo(({ artifactId }: ArtifactProps) => {
-  const userToggledActions = useRef(false);
-  const [showActions, setShowActions] = useState(false);
-  const [allActionFinished, setAllActionFinished] = useState(false);
-
   const artifacts = useStore(workbenchStore.artifacts);
   const artifact = artifacts[artifactId];
 
@@ -45,93 +41,12 @@ export const Artifact = memo(({ artifactId }: ArtifactProps) => {
     }),
   );
 
-  const toggleActions = () => {
-    userToggledActions.current = true;
-    setShowActions(!showActions);
-  };
-
-  useEffect(() => {
-    if (actions.length && !showActions && !userToggledActions.current) {
-      setShowActions(true);
-    }
-
-    if (actions.length !== 0 && artifact.type === 'bundled') {
-      const finished = !actions.find(
-        (action) => action.status !== 'complete' && !(action.type === 'start' && action.status === 'running'),
-      );
-
-      if (allActionFinished !== finished) {
-        setAllActionFinished(finished);
-      }
-    }
-  }, [actions, artifact.type, allActionFinished]);
-
-  // Determine the dynamic title based on state for bundled artifacts
-  const dynamicTitle =
-    artifact?.type === 'bundled'
-      ? allActionFinished
-        ? artifact.id === 'restored-project-setup'
-          ? 'Project Restored' // Title when restore is complete
-          : 'Project Created' // Title when initial creation is complete
-        : artifact.id === 'restored-project-setup'
-          ? 'Restoring Project...' // Title during restore
-          : 'Creating Project...' // Title during initial creation
-      : artifact?.title; // Fallback to original title for non-bundled or if artifact is missing
+  if (!actions.length) return null;
 
   return (
-    <>
-      <div className="my-1">
-        {/* Compact inline artifact header — no card, no "Click to open Workbench" */}
-        <div className="flex items-center gap-1.5 text-[12px] text-[#9E9890]">
-          <div className={classNames('text-sm', getIconColor(allActionFinished ? 'complete' : 'running'))}>
-            {allActionFinished ? (
-              <div className="i-ph:check"></div>
-            ) : (
-              <div className="i-svg-spinners:90-ring-with-bg"></div>
-            )}
-          </div>
-          <span className="font-medium text-[#D4D0CA]">{dynamicTitle}</span>
-          {actions.length > 0 && artifact.type !== 'bundled' && (
-            <button
-              onClick={toggleActions}
-              className="ml-1 p-0.5 rounded hover:bg-white/[0.04] transition-colors"
-            >
-              <div className={showActions ? 'i-ph:caret-up-bold text-[10px]' : 'i-ph:caret-down-bold text-[10px]'}></div>
-            </button>
-          )}
-        </div>
-
-        {/* Bundled artifact status */}
-        {artifact.type === 'bundled' && (
-          <div className="flex items-center gap-1.5 mt-1 text-[12px] text-[#9E9890]">
-            <span>
-              {allActionFinished
-                ? artifact.id === 'restored-project-setup'
-                  ? 'Restore files from snapshot'
-                  : 'Initial files created'
-                : 'Creating initial files'}
-            </span>
-          </div>
-        )}
-        <AnimatePresence>
-          {artifact.type !== 'bundled' && showActions && actions.length > 0 && (
-            <motion.div
-              className="actions"
-              initial={{ height: 0 }}
-              animate={{ height: 'auto' }}
-              exit={{ height: '0px' }}
-              transition={{ duration: 0.15 }}
-            >
-              <div className="bg-bolt-elements-artifacts-borderColor h-[1px]" />
-
-              <div className="p-5 text-left bg-bolt-elements-actions-background">
-                <ActionList actions={actions} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </>
+    <div className="my-1">
+      <ActionList actions={actions} />
+    </div>
   );
 });
 
@@ -174,10 +89,15 @@ export function openArtifactInWorkbench(filePath: any) {
 const ActionList = memo(({ actions }: ActionListProps) => {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}>
-      <ul className="list-none space-y-2.5">
+      <ul className="list-none space-y-1.5">
         {actions.map((action, index) => {
           const { status, type, content } = action;
           const isLast = index === actions.length - 1;
+
+          // git-diff line counts for file actions (new file: additions only)
+          const addedLines = type === 'file' && content ? content.trim().split('\n').length : 0;
+          const fileVerb =
+            status === 'complete' ? 'wrote' : status === 'failed' || status === 'aborted' ? 'failed to write' : 'writing';
 
           return (
             <motion.li
@@ -190,8 +110,8 @@ const ActionList = memo(({ actions }: ActionListProps) => {
                 ease: cubicEasingFn,
               }}
             >
-              <div className="flex items-center gap-1.5 text-sm">
-                <div className={classNames('text-lg', getIconColor(action.status))}>
+              <div className="flex items-center gap-1.5 text-[13px] text-[#9E9890]">
+                <div className={classNames('text-base shrink-0', getIconColor(action.status))}>
                   {status === 'running' ? (
                     <>
                       {type !== 'start' ? (
@@ -209,18 +129,20 @@ const ActionList = memo(({ actions }: ActionListProps) => {
                   ) : null}
                 </div>
                 {type === 'file' ? (
-                  <div>
-                    Create{' '}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[#6B6560]">{fileVerb}</span>
                     <code
-                      className="bg-bolt-elements-artifacts-inlineCode-background text-bolt-elements-artifacts-inlineCode-text px-1.5 py-1 rounded-md text-bolt-elements-item-contentAccent hover:underline cursor-pointer"
+                      className="font-mono text-[12px] text-[#D4D0CA] bg-white/[0.04] ring-1 ring-white/[0.05] px-1.5 py-0.5 rounded-md hover:underline cursor-pointer"
                       onClick={() => openArtifactInWorkbench(action.filePath)}
                     >
                       {action.filePath}
                     </code>
+                    <span className="font-mono text-[11px] text-[#2D7A4F]">+{addedLines}</span>
+                    <span className="font-mono text-[11px] text-[#F87171]">-0</span>
                   </div>
                 ) : type === 'shell' ? (
-                  <div className="flex items-center w-full min-h-[28px]">
-                    <span className="flex-1">Run command</span>
+                  <div className="flex items-center w-full min-h-[24px]">
+                    <span className="flex-1 text-[#6B6560]">Run command</span>
                   </div>
                 ) : type === 'start' ? (
                   <a
@@ -228,9 +150,9 @@ const ActionList = memo(({ actions }: ActionListProps) => {
                       e.preventDefault();
                       workbenchStore.currentView.set('preview');
                     }}
-                    className="flex items-center w-full min-h-[28px]"
+                    className="flex items-center w-full min-h-[24px]"
                   >
-                    <span className="flex-1">Start Application</span>
+                    <span className="flex-1 text-[#6B6560]">Start Application</span>
                   </a>
                 ) : null}
               </div>

@@ -76,7 +76,7 @@ export class ActionRunner {
 
   // Auto-fix configuration
   #autoFixAttempts: Map<string, number> = new Map();
-  #MAX_AUTO_FIX_ATTEMPTS = 15; // Bulletproof: don't stop until 1st version is complete
+  #MAX_AUTO_FIX_ATTEMPTS = 3; // Stop early — a fatal rebuild cascade fires if the LLM fix doesn't land
 
   // ─── Phase D: persist the auto-fix attempt counter to sessionStorage so a
   //     remount (browser reopen mid-fix-cycle) resumes the counter instead of

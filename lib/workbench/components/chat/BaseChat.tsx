@@ -42,6 +42,8 @@ interface BaseChatProps {
   hideWorkbench?: boolean;
   hideMenu?: boolean;
   isStreaming?: boolean;
+  /** vercel ChatStatus — drives 4-state SendButton. Omitted → boolean fallback. */
+  status?: 'ready' | 'submitted' | 'streaming' | 'error';
   onStreamingChange?: (streaming: boolean) => void;
   messages?: UIMessage[];
   description?: string;
@@ -96,6 +98,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       hideWorkbench = false,
       hideMenu = false,
       isStreaming = false,
+      status,
       onStreamingChange,
       model,
       setModel,
@@ -449,6 +452,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                   TEXTAREA_MIN_HEIGHT={TEXTAREA_MIN_HEIGHT}
                   TEXTAREA_MAX_HEIGHT={TEXTAREA_MAX_HEIGHT}
                   isStreaming={isStreaming}
+                  status={status}
                   handleStop={handleStop}
                   handleSendMessage={handleSendMessage}
                   enhancingPrompt={enhancingPrompt}

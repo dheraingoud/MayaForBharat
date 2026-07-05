@@ -11,7 +11,6 @@ import { classNames } from '@/lib/workbench/utils/classNames';
 import { detectLanguage } from '@/lib/workbench/utils/detectLanguage';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
-import { DynamicStatusPill } from './DynamicStatusPill';
 import { Greeting } from './Greeting';
 import { toast } from 'react-toastify';
 import { forwardRef, useState } from 'react';
@@ -214,11 +213,8 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
               );
             })
           : null}
-        {/* Phase R2: single authoritative DynamicIsland status pill — owns
-            reading/thinking/writing/running/done. Folds in the old 3-dot
-            reading placeholder + the duplicate inline status pill (deleted
-            from AssistantMessage). Mounts once at end of assistant column. */}
-        <DynamicStatusPill isStreaming={isStreaming} messages={messages} />
+        {/* No floating status pill — per-file git-diff rows in <Artifact>
+            are the single source of build progress. */}
         </div>
       </div>
     );

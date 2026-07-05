@@ -195,6 +195,12 @@ export const ChatImpl = memo(
     // Derive isLoading from status for backward compat
     const isLoading = status === 'streaming' || status === 'submitted';
 
+    // vercel 4-state for <SendButton>: error wins; fakeLoading (pre-stream UX
+    // hold) shows 'submitted' before the SDK flips to 'streaming'.
+    const chatStatus: 'ready' | 'submitted' | 'streaming' | 'error' = error
+      ? 'error'
+      : (fakeLoading && status === 'ready' ? 'submitted' : status);
+
     const promptHandledRef = useRef(false);
     useEffect(() => {
       // Use window.location as primary (reliable with dynamic imports / ssr: false)
@@ -598,6 +604,7 @@ export const ChatImpl = memo(
         hideWorkbench={hideWorkbench}
         hideMenu={hideMenu}
         isStreaming={isLoading || fakeLoading}
+        status={chatStatus}
         onStreamingChange={(streaming) => {
           streamingState.set(streaming);
         }}

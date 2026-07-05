@@ -172,10 +172,20 @@ const NIM_MODEL_CATALOG: Record<string, NimModelEntry> = {
   'deepseek-ai/deepseek-v3':             { maxTokenAllowed: 131072, maxCompletionTokens: 8192 },
 
   // ── StepFun ──
-  'stepfun-ai/step-3.7-flash':           { maxTokenAllowed: 32768,  maxCompletionTokens: 16384 },
+  // maxCompletionTokens bumped 16384 → 28672: step-3.7-flash emits
+  // delta.reasoning_content BEFORE the answer, and the prior 16384 cap with
+  // reasoning_budget = floor(max/3) = 5461 left only ~10.9k tokens for the
+  // bolt XML answer — a 5-file dashboard needs ~12-15k → truncated mid-XML,
+  // no <boltArtifact> ever emitted, zero file cards. 28672 leaves 4k for the
+  // prompt within the 32768 context, gives the answer ~21k after reasoning.
+  'stepfun-ai/step-3.7-flash':           { maxTokenAllowed: 32768,  maxCompletionTokens: 28672 },
 
   // ── MiniMax ──
-  'minimaxai/minimax-m3':                { maxTokenAllowed: 1048576, maxCompletionTokens: 16384 },
+  // maxCompletionTokens bumped 16384 → 32768: minimax-m3 has a 1M context so
+  // 32k completion leaves ample room for the prompt. reasoning_effort:'high'
+  // is a SEPARATE budget on NIM (not subtracted from max_completion_tokens),
+  // so the full 32k goes to the bolt XML answer — enough for a 5-file app.
+  'minimaxai/minimax-m3':                { maxTokenAllowed: 1048576, maxCompletionTokens: 32768 },
 
   // ── Meta Llama ──
   'meta/llama-3.3-70b-instruct':         { maxTokenAllowed: 131072, maxCompletionTokens: 4096 },
@@ -416,8 +426,8 @@ export function createNimModel(
 
         // Step 2: Ensure max_tokens is always set (SDK may omit it for 'compatible' providers)
         if (!body.max_tokens && !body.max_completion_tokens) {
-          body.max_tokens = 16384;
-          console.log(`[NIM Router] Injected default max_tokens=16384 for ${bareModelId}`);
+          body.max_tokens = 28672;
+          console.log(`[NIM Router] Injected default max_tokens=28672 for ${bareModelId}`);
         }
 
         // Step 3: Add reasoning params for known reasoning models only
@@ -427,8 +437,14 @@ export function createNimModel(
             body.reasoning_effort = body.reasoning_effort || 'high';
           } else {
             if (!body.chat_template_kwargs) {
-              const maxTokens = body.max_tokens || 16384;
-              const reasoningBudget = Math.min(Math.floor(maxTokens / 3), 32768);
+              // Read max_completion_tokens too — reasoning models (stepfun)
+              // set max_completion_tokens, NOT max_tokens, so the prior
+              // `body.max_tokens || 16384` always fell back to 16384 and the
+              // catalog bump never reached the reasoning_budget math.
+              const maxTokens = body.max_tokens || body.max_completion_tokens || 16384;
+              // Ratio 1/3 → 1/4: give the bolt XML answer more room. stepfun
+              // with 28672 cap → reasoningBudget=7168, answer gets ~21.5k.
+              const reasoningBudget = Math.min(Math.floor(maxTokens / 4), 16384);
               body.chat_template_kwargs = {
                 thinking: true,
                 enable_thinking: true,
@@ -540,7 +556,7 @@ export function createNimModel(
             const minimalBody: Record<string, any> = {
               model: body.model,
               messages: body.messages,
-              max_tokens: Math.min(body.max_tokens || 16384, 16384),
+              max_tokens: Math.min(body.max_tokens || 28672, 28672),
               stream: true,
             };
             console.warn(`[NIM Router] Minimal body keys: [${Object.keys(minimalBody).join(', ')}]`);
