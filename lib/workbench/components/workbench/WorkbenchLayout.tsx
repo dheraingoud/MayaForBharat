@@ -263,7 +263,7 @@ export const WorkbenchLayout = memo(() => {
           <Panel defaultSize={70}>
             <PanelGroup direction="vertical" className="h-full">
               {/* Preview */}
-              <Panel defaultSize={showTerminal ? 75 : 100} minSize={30}>
+              <Panel defaultSize={showTerminal ? 70 : 100} minSize={30}>
                 <PreviewPanel
                   viewport={viewport}
                   setSelectedElement={setSelectedElement}

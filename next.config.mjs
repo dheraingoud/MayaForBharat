@@ -1,3 +1,8 @@
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
@@ -6,6 +11,14 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+  },
+  // Pin turbopack's workspace root to this app dir. Without this, Next infers the
+  // root from the nearest lockfile — and a stray ~/package-lock.json makes it
+  // pick the home dir, which leaves vendored /api/workbench/* routes stuck on a
+  // stale compile cache (they 404 until manually touched). Pinning here forces
+  // correct invalidation and module resolution.
+  turbopack: {
+    root: __dirname,
   },
   // Allow cross-origin during dev; production served via Vercel
   async headers() {

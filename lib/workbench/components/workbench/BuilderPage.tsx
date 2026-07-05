@@ -1767,7 +1767,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
             <ResizablePanel defaultSize={58} minSize={38}>
               <PanelGroup direction="vertical" className="h-full">
-                <Panel defaultSize={75} minSize={30}>
+                <Panel defaultSize={showTerminal ? 70 : 100} minSize={30}>
                   <WorkbenchPreview viewport={viewport} viewportSetter={setViewport} />
                 </Panel>
                 <PanelResizeHandle className="relative flex h-px items-center justify-center cursor-row-resize bg-white/[0.04] hover:bg-[#E8601A]/20 active:bg-[#E8601A]/30 transition-colors duration-150" />
