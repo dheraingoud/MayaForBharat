@@ -479,6 +479,14 @@ export function createNimModel(
 
     // ── First attempt ──
     let response = await globalThis.fetch(url, init);
+    // DIAG: capture non-200 status + body head for stream + non-stream (logs otherwise swallow stream errors)
+    if (!response.ok) {
+      try {
+        const cloned = response.clone();
+        const errBody = await cloned.text();
+        console.error(`[NIM Router] FIRST-ATTEMPT ${response.status} for ${bareModelId}: ${errBody.slice(0, 500)}`);
+      } catch { /* ignore */ }
+    }
 
     // ── Retry on 400 — strip rejected fields (matches client.py L111-L176) ──
     if (response.status === 400 && init?.body && typeof init.body === 'string') {
@@ -578,8 +586,33 @@ export function createNimModel(
       } catch { /* let original error propagate */ }
     }
 
+    // ── Retry on 503 — NIM "ResourceExhausted: All workers are busy, please retry later" ──
+    // v4-flash (and other reasoning models) intermittently return 503 under load.
+    // NIM explicitly asks us to retry. Exponential backoff: 1s, 2s, 4s (max 3 retries).
+    // Without this, a single 503 kills the whole stream → "Model returned no files" toast.
+    if (response.status === 503 && init?.body) {
+      const backoffs = [1000, 2000, 4000];
+      for (let attempt = 0; attempt < backoffs.length && response.status === 503; attempt++) {
+        console.warn(`[NIM Router] 503 (workers busy) for ${bareModelId}; retry ${attempt + 1}/${backoffs.length} after ${backoffs[attempt]}ms`);
+        await new Promise((resolve) => setTimeout(resolve, backoffs[attempt]));
+        try {
+          response = await globalThis.fetch(url, init);
+        } catch (fetchErr) {
+          console.warn(`[NIM Router] 503 retry ${attempt + 1} fetch threw for ${bareModelId}:`, fetchErr);
+          break;
+        }
+      }
+      if (response.status === 503) {
+        console.error(`[NIM Router] FATAL: ${bareModelId} still returns 503 after ${backoffs.length} retries — NIM workers persistently busy`);
+      }
+    }
+
     // ── Key health tracking ──
     if (response.status === 429) {
+      nimRotator.markRateLimited(effectiveKey);
+    } else if (response.status === 503) {
+      // 503 = transient worker exhaustion on NIM's side; don't permanently mark key bad,
+      // but don't mark healthy either (so the rotator gives it a brief rest).
       nimRotator.markRateLimited(effectiveKey);
     } else if (response.ok) {
       nimRotator.markHealthy(effectiveKey);
