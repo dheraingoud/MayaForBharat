@@ -151,23 +151,31 @@ export function BuilderPageWithJob({
   useEffect(() => {
     if (job.status !== 'live') return;
 
-    // Empty live (model produced no file actions) is NOT an error — the model
-    // either finished an empty response (probably network glitch) or
-    // returned only text. Just nudge the user with a toast; do NOT set the
-    // alert state, because the chat alert renders as a Terminal Error modal
-    // regardless of type for non-error sources by mistake. Keep `alert`
-    // cleared so the workbench is fully usable.
+    // Empty live (model produced no file actions) from the DETACHED Convex
+    // job. The in-browser chat path (BuilderPage's action-runner) runs the
+    // SAME prompt in parallel + writes files into the live WebContainer. If
+    // that path already populated workbenchStore.files — which it does the
+    // moment the model emits any boltAction — the detached `live`+0 row is a
+    // false positive (a stale/old Convex deployment that markLives w/ [] on a
+    // 503/reasoning-only stream, or a parallel race it lost) and MUST NOT
+    // toast "no files" while the user is staring at a working vite preview.
+    // Only surface the toast when the in-browser store is also empty — the
+    // genuine no-files-anywhere case.
     if (!job.files || job.files.length === 0) {
-      try {
-        // Best-effort: clear any modal that may have been set elsewhere so
-        // the workbench doesn't get stuck showing a Terminal Error card.
-        workbenchStore.actionAlert.set(undefined);
-      } catch {
-        /* ignore */
+      const inBrowserFiles = workbenchStore.files.get();
+      const inBrowserCount = inBrowserFiles ? Object.keys(inBrowserFiles).length : 0;
+      if (inBrowserCount === 0) {
+        try {
+          // Best-effort: clear any modal that may have been set elsewhere so
+          // the workbench doesn't get stuck showing a Terminal Error card.
+          workbenchStore.actionAlert.set(undefined);
+        } catch {
+          /* ignore */
+        }
+        toast.warn('Model returned no files. Try a more specific prompt or retry.', {
+          toastId: 'no-files',
+        });
       }
-      toast.warn('Model returned no files. Try a more specific prompt or retry.', {
-        toastId: 'no-files',
-      });
       return;
     }
     // Survival-vs-visible gate. The in-browser stream (BuilderPage's
@@ -210,6 +218,36 @@ export function BuilderPageWithJob({
         toast.warn(`Wrote ${written}/${job.files!.length} files (${failed.length} failed)`);
       } else {
         toast.success(`Build ready · ${written} files`, { autoClose: 2500 });
+      }
+
+      // Boot the dev server in the WebContainer we just wrote into. BuilderPage's
+      // AutoStart effect (L928) does NOT cover this hydration path: it requires
+      // `hasMessages` (chat history) AND its dep array omits workbenchStore.files,
+      // so a freshly hydrated detached job (no chat, files arrive post-mount)
+      // falls through both guards → preview stays "No preview detected" forever
+      // even though 8 files wrote OK. We reached here only because the in-browser
+      // store was empty (gate at L189), so the in-browser action-runner didn't
+      // emit shell/start actions either — safe to boot here.
+      const previews = workbenchStore.previews.get();
+      if (previews.length === 0) {
+        (async () => {
+          try {
+            const wc = await webcontainer;
+            const { detectProjectCommands } = await import('@/lib/workbench/utils/projectCommands');
+            const fileList = (job.files ?? []).map((f) => ({ path: f.path, content: f.content }));
+            const commands = await detectProjectCommands(fileList);
+            const installCmd = commands.setupCommand || 'npm install --no-audit --no-fund';
+            const startCmd = commands.startCommand || 'npm run dev';
+            const installProc = await wc.spawn('sh', ['-c', installCmd]);
+            const installExit = await installProc.exit;
+            if (installExit !== 0) {
+              console.warn('[BuilderPageWithJob] install exit', installExit, '— trying dev anyway');
+            }
+            await wc.spawn('sh', ['-c', startCmd]); // don't await — runs indefinitely
+          } catch (e) {
+            console.error('[BuilderPageWithJob] dev-server boot failed', e);
+          }
+        })();
       }
     });
   }, [job.status, job._id, job.files, appId]);

@@ -127,7 +127,7 @@ export async function generateJobsHandler(
     cancelInterval = setInterval(() => {
       void checkCancel().catch(() => {});
     }, CANCEL_CHECK_INTERVAL_MS);
-    await streamText({
+    const streamResult: any = await streamText({
       messages: [
         {
           role: 'user',
@@ -227,6 +227,23 @@ export async function generateJobsHandler(
         },
       } as any,
     });
+
+    // AI SDK v6: streamText() returns a result object whose callbacks
+    // (onChunk/onFinish/onError) ONLY fire when the underlying stream is
+    // consumed. route.ts consumes via toUIMessageStreamResponse() (piped to
+    // the HTTP response). This detached handler has no HTTP body to pipe to,
+    // so it MUST explicitly drive the stream — awaiting result.text consumes
+    // the full stream, firing onChunk (→ partialText accumulates) and
+    // onFinish (→ markLive/markError + didMark=true). Without this, streamText
+    // returns immediately, onFinish never fires, and the belt-and-braces
+    // fallback below markErrors with "0 chars captured" (the E2E build bug
+    // where every NIM model produced a `live`+0-files job in <200ms).
+    try {
+      await streamResult.text;
+    } catch {
+      // onError already persisted the error; the !didMark fallback below
+      // will markError. Don't rethrow — we want the deterministic fallback.
+    }
 
     // Belt-and-braces: if onFinish didn't fire (rare), derive final from partial.
     if (!didMark) {
