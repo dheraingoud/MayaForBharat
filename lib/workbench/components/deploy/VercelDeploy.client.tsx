@@ -8,11 +8,19 @@ import { useState } from 'react';
 import type { ActionCallbackData } from '@/lib/workbench/runtime/message-parser';
 import { chatId } from '@/lib/workbench/persistence/useChatHistory';
 import { formatBuildFailureOutput } from './deployUtils';
+import { useMutation } from 'convex/react';
+import { api } from '@/convex/_generated/api';
+import { useDeployedPreview } from '@/lib/workbench/hooks/useDeployedPreview';
 
 export function useVercelDeploy() {
   const [isDeploying, setIsDeploying] = useState(false);
   const vercelConn = useStore(vercelConnection);
   const currentChatId = useStore(chatId);
+  // Persist deploy state directly to Convex (Bug 2026-07-08). NOTE: do NOT
+  // import lib/store.ts here — that module uses Node 'fs'/'path' and would
+  // break the Client Component browser bundle with "Can't resolve 'fs'".
+  const deployed = useDeployedPreview(currentChatId);
+  const updateAppMutation = useMutation(api.apps.update);
 
   const handleVercelDeploy = async () => {
     // Use global DEPLOY_TOKEN — user doesn't need to connect their own account
@@ -228,6 +236,21 @@ export function useVercelDeploy() {
 
       // Show success toast notification
       toast.success(`🚀 Vercel deployment completed successfully!`);
+
+      // Persist deploy state to Convex so a browser-close → reopen shows the
+      // deployed URL directly (Bug 2026-07-08). Patches apps.vercelUrl +
+      // status='deployed' + deploymentId; read back by Preview/BuilderPage on
+      // reopen to prefer the deployed preview over a fresh local boot. Uses the
+      // Convex mutation directly (not lib/store.ts — that's a Node 'fs' module
+      // and would break the browser bundle).
+      if (currentChatId && deployed.docId) {
+        void updateAppMutation({
+          id: deployed.docId as any,
+          status: 'deployed',
+          vercelUrl: data.deploy.url,
+          deploymentId: data.deploy.id,
+        }).catch((e) => console.error('[Vercel Deploy] persist deploy state failed', e));
+      }
 
       // Deploy-time visual verification (non-blocking; real screenshots via screenshotone.com)
       (async () => {

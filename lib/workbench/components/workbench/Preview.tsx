@@ -7,6 +7,8 @@ import { PortDropdown } from './PortDropdown';
 import { ScreenshotSelector } from './ScreenshotSelector';
 import { expoUrlAtom } from '@/lib/workbench/stores/qrCodeStore';
 import { ExpoQrModal } from '@/lib/workbench/components/workbench/ExpoQrModal';
+import { chatId } from '@/lib/workbench/persistence/useChatHistory';
+import { useDeployedPreview } from '@/lib/workbench/hooks/useDeployedPreview';
 import type { ElementInfo } from './Inspector';
 
 type ResizeSide = 'left' | 'right' | null;
@@ -91,18 +93,39 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
   const expoUrl = useStore(expoUrlAtom);
   const [isExpoQrModalOpen, setIsExpoQrModalOpen] = useState(false);
 
-  useEffect(() => {
-    if (!activePreview) {
-      setIframeUrl(undefined);
-      setDisplayPath('/');
+  // Deployed-preview-on-reopen (Bug 2026-07-08): chatId == appId global store,
+  // set from useChatHistory when the chat loads. useDeployedPreview reactively
+  // reads the apps row's vercelUrl + status so a reopened deployed project can
+  // render its live Vercel URL directly — no fresh WebContainer `npm run dev`.
+  const appId = useStore(chatId);
+  const deployed = useDeployedPreview(appId);
 
+  // The local WebContainer preview iframe AND the deployed-URL iframe share the
+  // same render branch; the empty-state only shows when neither is available.
+  const hasPreviewToRender = !!activePreview || (deployed.isDeployed && !!deployed.vercelUrl);
+
+  useEffect(() => {
+    // Local WebContainer preview wins whenever present — that's the actively
+    // edited build (new boltAction → npm run dev → preview port opens).
+    if (activePreview) {
+      const { baseUrl } = activePreview;
+      setIframeUrl(baseUrl);
+      setDisplayPath('/');
       return;
     }
 
-    const { baseUrl } = activePreview;
-    setIframeUrl(baseUrl);
+    // No local preview yet — fall back to the deployed Vercel URL on reopen so
+    // a deployed project shows its preview directly instead of an empty
+    // "No preview detected" state while we skip booting a fresh dev server.
+    if (deployed.isDeployed && deployed.vercelUrl) {
+      setIframeUrl(deployed.vercelUrl);
+      setDisplayPath('/');
+      return;
+    }
+
+    setIframeUrl(undefined);
     setDisplayPath('/');
-  }, [activePreview]);
+  }, [activePreview, deployed.isDeployed, deployed.vercelUrl]);
 
   const findMinPortIndex = useCallback(
     (minIndex: number, preview: { port: number }, index: number, array: { port: number }[]) => {
@@ -911,7 +934,7 @@ export const Preview = memo(({ setSelectedElement }: PreviewProps) => {
             alignItems: 'center',
           }}
         >
-          {activePreview ? (
+          {hasPreviewToRender ? (
             <>
               {isDeviceModeOn && showDeviceFrameInPreview ? (
                 <div

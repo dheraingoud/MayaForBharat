@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLanguage } from '@/app/providers'
 import { useCreateGenerateJob } from '@/lib/workbench/hooks/useCreateGenerateJob'
+import { useDeployedPreview } from '@/lib/workbench/hooks/useDeployedPreview'
 import { Greeting } from '@/lib/workbench/components/chat/Greeting'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -155,6 +156,15 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   const router = useRouter()
   const { language } = useLanguage()
   const createJob = useCreateGenerateJob()
+
+  // Deployed-preview-on-reopen (Bug 2026-07-08): when the apps row is
+  // `deployed` with a vercelUrl, skip the local `npm run dev` boot so the
+  // preview loads the deployed URL directly (Preview.tsx prefers vercelUrl
+  // when no local preview exists). Stored in a ref so the AutoStart +5s
+  // timeout reads the latest query result, not the mount-closure snapshot.
+  const deployed = useDeployedPreview(appId)
+  const deployedRef = useRef(deployed)
+  deployedRef.current = deployed
 
   const [mounted, setMounted] = useState(false)
   const [app, setApp] = useState<AppData | null>(null)
@@ -1038,6 +1048,15 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       // detached `live` hydrate) may have started the dev server during the
       // delay. If so, defer — a second `npm run dev` would clobber the first
       // vite and race for the same port.
+      // Deployed-preview-on-reopen (Bug 2026-07-08): if the apps row is
+      // `deployed` with a vercelUrl and no local preview exists, skip the
+      // local boot — Preview.tsx renders the deployed URL directly. Active
+      // edits later still boot local via the action-runner's bolt shell/start.
+      if (deployedRef.current.isDeployed && deployedRef.current.vercelUrl) {
+        logger.info('[AutoStart] app is deployed — showing deployed preview, skipping local boot')
+        autoStartedRef.current = true
+        return
+      }
       if (devServerBooting.get()) {
         logger.info('[AutoStart] dev server booted during delay — skipping')
         autoStartedRef.current = true

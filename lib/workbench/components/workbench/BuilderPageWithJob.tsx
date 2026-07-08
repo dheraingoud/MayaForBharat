@@ -31,6 +31,7 @@ import {
 } from '@/lib/workbench/components/workbench/GenerateJobCard';
 import { webcontainer } from '@/lib/workbench/webcontainer';
 import { devServerBooting } from '@/lib/workbench/stores/streaming';
+import { useDeployedPreview } from '@/lib/workbench/hooks/useDeployedPreview';
 
 // Importing builder page via dynamic is what /workbench/[id]/page.tsx does today;
 // we reuse that pattern so SSR/WebContainer boot behavior matches.
@@ -89,6 +90,14 @@ export function BuilderPageWithJob({
   const cancelJob = useCancelGenerateJob();
   const submittedRef = useRef(false);
   const mountedFileSetRef = useRef<string | null>(null);
+
+  // Deployed-preview-on-reopen (Bug 2026-07-08): read the apps row's deployed
+  // state reactively; stored in a ref so Effect#2 (which closes over mount-time
+  // values) reads the latest. When deployed + vercelUrl, we skip the local
+  // `npm run dev` boot and let Preview.tsx render the deployed URL directly.
+  const deployed = useDeployedPreview(appId);
+  const deployedRef = useRef(deployed);
+  deployedRef.current = deployed;
 
   // ── 1. On first mount, if the user came in with ?prompt=... AND no live row
   //      exists yet, kick off a brand-new generation job.
@@ -230,7 +239,11 @@ export function BuilderPageWithJob({
       // store was empty (gate at L189), so the in-browser action-runner didn't
       // emit shell/start actions either — safe to boot here.
       const previews = workbenchStore.previews.get();
-      if (previews.length === 0) {
+      // Deployed app reopen: skip the local dev boot — Preview.tsx shows the
+      // deployed Vercel URL directly (Bug 2026-07-08). Files were still written
+      // above so a later local edit can boot without re-fetching.
+      const skipBoot = deployedRef.current.isDeployed && !!deployedRef.current.vercelUrl;
+      if (previews.length === 0 && !skipBoot) {
         (async () => {
           // Cross-component double-boot gate (Bug 2026-07-08): on a come-back
           // reopen BuilderPage's AutoStart AND this Effect#2 can both fire
