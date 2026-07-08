@@ -118,6 +118,13 @@ export default defineSchema({
     filesJson: v.optional(v.string()),
     error: v.optional(v.string()),
     createdAt: v.number(),
+    // Wall-clock of the last saveProgress (partialText/progressNote) patch —
+    // bumped server-side inside saveProgress every ~SAVE_EVERY_MS (3s) while
+    // chunks flow. The stale sweeper keys off this (falling back to createdAt)
+    // so an ACTIVELY-streaming build that takes >2min to emit files is NOT
+    // killed as "stale." A truly stuck stream (no chunks → no save) still trips
+    // it. See _listBuildingOlderThan + sweepStaleHandler.
+    lastProgressAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
   })
     .index("by_app", ["appId"])

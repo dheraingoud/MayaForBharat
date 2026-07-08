@@ -373,8 +373,12 @@ export async function generateJobsHandler(
 }
 
 /**
- * Cron-tick sweeper: any 'building' job whose createdAt is older than TWO_MIN_MS
- * is almost certainly stuck (worker timed out, crashed, or the dev process died).
+ * Cron-tick sweeper: any 'building' job whose last activity (lastProgressAt,
+ * falling back to createdAt) is older than TWO_MIN_MS is almost certainly
+ * stuck (worker timed out, crashed, or the dev process died). Keying off
+ * lastProgressAt — bumped by saveProgress every ~3s while chunks flow — means
+ * an actively-streaming build that takes >2min to emit files is NOT swept,
+ * while a truly silent stream (no chunks → no save) still is.
  * We flip it to error so the UI shows a Retry button instead of an infinite spinner.
  *
  * Free-tier note: this action runs once per minute and touches at most a handful

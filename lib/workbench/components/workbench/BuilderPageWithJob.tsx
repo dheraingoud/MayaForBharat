@@ -19,6 +19,7 @@ import { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { generateId } from 'ai';
 import { toast } from 'react-toastify';
+import { useStore } from '@nanostores/react';
 
 const BUILD_CANCEL_KEY = 'Escape';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
@@ -90,6 +91,16 @@ export function BuilderPageWithJob({
   const cancelJob = useCancelGenerateJob();
   const submittedRef = useRef(false);
   const mountedFileSetRef = useRef<string | null>(null);
+
+  // Reactive in-browser file map. The detached Convex job and the in-browser
+  // chat stream (BuilderPage's action-runner) both generate the same app; when
+  // the in-browser path has already populated workbenchStore.files, the active
+  // build is owned end-to-end by the chat (EAGER-MOUNT intent below). A detached
+  // sweeper 'error' must NOT yank <BuilderPage> in that case — killing the live
+  // in-browser stream + preview. Only show <GenerateJobCard> when the in-browser
+  // store is ALSO empty (genuine "nothing produced anywhere" failure).
+  const inBrowserFiles = useStore(workbenchStore.files);
+  const inBrowserCount = inBrowserFiles ? Object.keys(inBrowserFiles).length : 0;
 
   // Deployed-preview-on-reopen (Bug 2026-07-08): read the apps row's deployed
   // state reactively; stored in a ref so Effect#2 (which closes over mount-time
@@ -304,7 +315,9 @@ export function BuilderPageWithJob({
   //   failed/cancelled job (has a row + error/cancelled status). The active
   //   build is now owned end-to-end by the chat.
   const showCard =
-    !!job._id && (job.status === 'error' || job.status === 'cancelled');
+    !!job._id &&
+    (job.status === 'error' || job.status === 'cancelled') &&
+    inBrowserCount === 0; // active in-browser build (files in store) owns the view
 
   if (showCard) {
     return (
@@ -317,28 +330,39 @@ export function BuilderPageWithJob({
           if ('ok' in r && r.ok) toast('Build cancelled', { type: 'info' });
         }}
         onRetry={async () => {
-          if (!prompt || !model || !provider) {
+          // Come-back durability: prefer the fresh URL triplet, fall back to
+          // the triplet persisted on the generateJobs row (useGenerateJob now
+          // surfaces job.prompt/model/provider). Without this, a dashboard
+          // come-back (no query) bails here -> "all gone" dead-end.
+          const p = prompt ?? job.prompt;
+          const m = model ?? job.model;
+          const pr = provider ?? job.provider;
+          if (!p || !m || !pr) {
             toast.error('Missing original prompt — open the dashboard to retry.');
             return;
           }
           submittedRef.current = false;
           mountedFileSetRef.current = null;
           try {
-            await createJob({ appId, prompt, model, provider });
+            await createJob({ appId, prompt: p, model: m, provider: pr });
             toast.info('Retrying build');
           } catch (e: any) {
             toast.error(`Retry failed: ${e.message}`);
           }
         }}
         onBuild={async () => {
-          if (!prompt || !model || !provider) {
+          // Same persisted-triplet fallback as onRetry (come-back durability).
+          const p = prompt ?? job.prompt;
+          const m = model ?? job.model;
+          const pr = provider ?? job.provider;
+          if (!p || !m || !pr) {
             toast.error('Missing original prompt.');
             return;
           }
           submittedRef.current = false;
           mountedFileSetRef.current = null;
           try {
-            await createJob({ appId, prompt, model, provider });
+            await createJob({ appId, prompt: p, model: m, provider: pr });
           } catch (e: any) {
             toast.error(`Build failed: ${e.message}`);
           }

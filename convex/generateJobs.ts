@@ -190,7 +190,13 @@ export const _listBuildingOlderThan = internalQuery({
       .withIndex("by_status", (q) => q.eq("status", "building"))
       .collect();
     for (const r of all) {
-      if (r.createdAt < olderThan) {
+      // Key off the last progress patch, NOT createdAt — an actively-streaming
+      // complex build can take >2min wall-clock to emit files, and saveProgress
+      // bumps lastProgressAt every ~3s while chunks flow. `??` binds looser
+      // than `<`, so parenthesize. Falling back to createdAt covers rows
+      // created before this field existed + pending rows that haven't saved yet.
+      const lastActivity = (r.lastProgressAt ?? r.createdAt) as number;
+      if (lastActivity < olderThan) {
         matches.push({ _id: r._id, createdAt: r.createdAt });
       }
     }
@@ -216,7 +222,7 @@ export const saveProgress = internalMutation({
     if (!row) return;
     if (row.status === "cancelled" || row.status === "live" || row.status === "error")
       return;
-    await ctx.db.patch(jobId, { partialText, progressNote });
+    await ctx.db.patch(jobId, { partialText, progressNote, lastProgressAt: Date.now() });
   },
 });
 

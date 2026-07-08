@@ -35,6 +35,14 @@ export interface GenerateJobView {
   error: string | null;
   progressNote: string | null;
   appId?: string | null;
+  // Persisted build triplet (schema.ts L113-115, non-optional). Surfaced so
+  // come-back retry/rebuild (BuilderPageWithJob onRetry/onBuild) and Effect#1
+  // can recover an errored/cancelled job WITHOUT the transient URL query. This
+  // is the zero-deploy durability lever: getByAppId already returns the full
+  // row via `...best`, we just stop stripping these fields from the view.
+  prompt?: string | null;
+  model?: string | null;
+  provider?: string | null;
   transientJob: {
     _id: string;
     status: GenerateJobStatus;
@@ -115,6 +123,9 @@ export function useGenerateJob(
     files: decodeFiles(row.filesJson),
     error: (row.error as string | null | undefined) ?? null,
     progressNote: (row.progressNote as string | null | undefined) ?? null,
+    prompt: (row.prompt as string | null | undefined) ?? null,
+    model: (row.model as string | null | undefined) ?? null,
+    provider: (row.provider as string | null | undefined) ?? null,
     transientJob: (row.transientJob as GenerateJobView['transientJob']) ?? null,
     isReady: true,
     queryError: null,
