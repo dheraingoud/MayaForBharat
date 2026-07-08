@@ -30,6 +30,7 @@ import {
   GenerateJobCard,
 } from '@/lib/workbench/components/workbench/GenerateJobCard';
 import { webcontainer } from '@/lib/workbench/webcontainer';
+import { devServerBooting } from '@/lib/workbench/stores/streaming';
 
 // Importing builder page via dynamic is what /workbench/[id]/page.tsx does today;
 // we reuse that pattern so SSR/WebContainer boot behavior matches.
@@ -231,6 +232,16 @@ export function BuilderPageWithJob({
       const previews = workbenchStore.previews.get();
       if (previews.length === 0) {
         (async () => {
+          // Cross-component double-boot gate (Bug 2026-07-08): on a come-back
+          // reopen BuilderPage's AutoStart AND this Effect#2 can both fire
+          // against the same WebContainer → two concurrent installs + two vite
+          // servers fighting for the same port. The first path to reach the
+          // spawn sets the flag; the second bails.
+          if (devServerBooting.get()) {
+            console.info('[BuilderPageWithJob] dev server already booting — skipping');
+            return;
+          }
+          devServerBooting.set(true);
           try {
             const wc = await webcontainer;
             const { detectProjectCommands } = await import('@/lib/workbench/utils/projectCommands');
@@ -246,6 +257,10 @@ export function BuilderPageWithJob({
             await wc.spawn('sh', ['-c', startCmd]); // don't await — runs indefinitely
           } catch (e) {
             console.error('[BuilderPageWithJob] dev-server boot failed', e);
+            // Release the boot flag on failure — previews.ts only clears it on
+            // `server-ready`/port-open success, so we must self-clear here or a
+            // competing path / retry would be blocked forever.
+            devServerBooting.set(false);
           }
         })();
       }

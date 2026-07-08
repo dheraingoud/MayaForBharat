@@ -45,7 +45,7 @@ import { replayMessages } from '@/lib/workbench/hooks/useMessageParser'
 import { chatId as chatIdAtom, description, useChatHistory } from '@/lib/workbench/persistence'
 import { chatStore } from '@/lib/workbench/stores/chat'
 import { workbenchStore } from '@/lib/workbench/stores/workbench'
-import { streamingState } from '@/lib/workbench/stores/streaming'
+import { streamingState, devServerBooting } from '@/lib/workbench/stores/streaming'
 import { DEFAULT_MODEL, PROMPT_COOKIE_KEY } from '@/lib/workbench/utils/constants'
 import { createScopedLogger } from '@/lib/workbench/utils/logger'
 import { createSampler } from '@/lib/workbench/utils/sampler'
@@ -973,6 +973,16 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     const previews = workbenchStore.previews.get()
     if (previews.length > 0) return  // Preview already showing
 
+    // Another path is already booting the dev server (BuilderPageWithJob
+    // Effect#2 may have fired on a detached `live` hydrate). Bail so we
+    // don't spawn a second `npm install && npm run dev` against the same
+    // WebContainer — flag auto-clears on `server-ready` (previews.ts).
+    if (devServerBooting.get()) {
+      autoStartedRef.current = true
+      logger.info('[AutoStart] dev server already booting — skipping')
+      return
+    }
+
     // Check if any shell/start action is currently running or was executed
     const allArtifacts = workbenchStore.artifacts.get()
     let hasRunningAction = false
@@ -1024,6 +1034,16 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         return
       }
 
+      // T+5s recheck: a parallel boot path (BuilderPageWithJob Effect#2 on a
+      // detached `live` hydrate) may have started the dev server during the
+      // delay. If so, defer — a second `npm run dev` would clobber the first
+      // vite and race for the same port.
+      if (devServerBooting.get()) {
+        logger.info('[AutoStart] dev server booted during delay — skipping')
+        autoStartedRef.current = true
+        return
+      }
+      devServerBooting.set(true)
       logger.info('[AutoStart] Reloaded project detected — auto-starting dev server (no AI needed)')
       toast.info('Restoring project preview...', { autoClose: 4000, toastId: 'auto-start-reload' })
 
@@ -1051,6 +1071,9 @@ export function BuilderPage({ appId }: BuilderPageProps) {
             logger.info('[AutoStart] Dev server started')
           } catch (e) {
             logger.error('[AutoStart] Failed to auto-start project:', e)
+            // Release the boot flag on failure so a competing path / retry
+            // isn't blocked forever — previews.ts only clears it on success.
+            devServerBooting.set(false)
           }
         })
       })

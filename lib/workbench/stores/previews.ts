@@ -1,5 +1,6 @@
 import type { WebContainer } from '@webcontainer/api';
 import { atom } from 'nanostores';
+import { devServerBooting } from './streaming';
 
 // Extend Window interface to include our custom property
 declare global {
@@ -182,6 +183,10 @@ export class PreviewsStore {
     // Listen for server ready events
     webcontainer.on('server-ready', (port, url) => {
       console.log('[Preview] Server ready on port:', port, url);
+      // Vite is up — release the devServerBooting flag so any competing
+      // boot path (AutoStart vs BuilderPageWithJob Effect#2) bails instead
+      // of spawning a second `npm run dev` against the same WC. See streaming.ts.
+      devServerBooting.set(false);
       this.broadcastUpdate(url);
 
       // Initial storage sync when preview is ready
@@ -213,6 +218,10 @@ export class PreviewsStore {
       this.previews.set([...previews]);
 
       if (type === 'open') {
+        // A real preview port opened — release the boot flag (belt-and-braces
+        // alongside the server-ready handler above; port open often fires
+        // first or as the sole signal).
+        devServerBooting.set(false);
         this.broadcastUpdate(url);
       }
     });
