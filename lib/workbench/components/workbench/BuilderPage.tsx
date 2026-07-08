@@ -14,6 +14,8 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLanguage } from '@/app/providers'
+import { useCreateGenerateJob } from '@/lib/workbench/hooks/useCreateGenerateJob'
+import { Greeting } from '@/lib/workbench/components/chat/Greeting'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Loader2, Search,
@@ -152,6 +154,7 @@ function extractMessageText(message: UIMessage): string {
 export function BuilderPage({ appId }: BuilderPageProps) {
   const router = useRouter()
   const { language } = useLanguage()
+  const createJob = useCreateGenerateJob()
 
   const [mounted, setMounted] = useState(false)
   const [app, setApp] = useState<AppData | null>(null)
@@ -855,13 +858,25 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       return
     }
 
+    // Cold-start grace: a fresh build runs `npm install` (~30-40s) →
+    // `npm run dev` (vite ~8s) → iframe first-paint (~5s) ≈ 45s BEFORE the
+    // WebContainer `server-ready` event populates `workbenchStore.previews`.
+    // A flat 30s deadline fired the "preview didn't load" auto-fix DURING a
+    // successful cold build (vite booted ~8s AFTER the 30s timer expired) —
+    // corrupting a working build with a spurious 2nd reasoning pass + a
+    // "Build error" card next to a live preview. Give the FIRST cycle 90s
+    // (covers cold-install worst case + vite + paint, with margin); retries
+    // stay 30s since by cycle 2 install already finished and a genuine vite
+    // hang should be diagnosed fast. L863 guard still returns harmlessly if
+    // the preview lands before the deadline.
+    const previewHealthGraceMs = autoRunAttemptsRef.current === 0 ? 90_000 : 30_000
     previewHealthRef.current = setTimeout(() => {
       const currentPreviews = workbenchStore.previews.get()
       if (currentPreviews.length > 0) return // Preview appeared, all good
       if (streamingState.get()) return // Use nanostore instead of stale closure
 
       autoRunAttemptsRef.current += 1
-      logger.info(`[PreviewHealth] No preview after 30s — auto-fixing (cycle ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})`)
+      logger.info(`[PreviewHealth] No preview after ${previewHealthGraceMs / 1000}s — auto-fixing (cycle ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})`)
       toast.info('No preview detected — checking for errors...', {
         autoClose: 3000,
         toastId: 'preview-health',
@@ -884,7 +899,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         `[Model: ${model}]`,
         `[Provider: ${provider.name}]`,
         '',
-        `The dev server was started but no preview appeared after 30 seconds (auto-diagnostic attempt ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES}). This usually means a compilation error or the dev server crashed silently.`,
+        `The dev server was started but no preview appeared after ${previewHealthGraceMs / 1000} seconds (auto-diagnostic attempt ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES}). This usually means a compilation error or the dev server crashed silently.`,
         '',
         'Inspect the code for import errors (missing modules, wrong paths), syntax errors, missing dependencies in package.json. Fix ONLY the broken source files, re-emit only the corrected files in bolt action file tags.',
         'Do NOT re-run npm install, npm run build, tests, or npm run dev — the dev server is already running and will hot-reload your fix automatically.',
@@ -895,7 +910,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       // so the card labels it "preview" not "terminal".
       workbenchStore.buildErrorCard.set({
         command: '(preview-health)',
-        error: 'Dev server started but no preview appeared after 30s. Running auto-diagnostics…',
+        error: `Dev server started but no preview appeared after ${previewHealthGraceMs / 1000}s. Running auto-diagnostics…`,
         source: 'preview',
         attempt: autoRunAttemptsRef.current,
         maxAttempts: MAX_AUTO_RUN_CYCLES,
@@ -909,7 +924,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         trackedSendMessage({ text: visibleBreadcrumb })
         setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
       }
-    }, 30000)
+    }, previewHealthGraceMs)
 
     return () => {
       if (previewHealthRef.current) {
@@ -1379,6 +1394,22 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         if (window.location.pathname === '/workbench' || !window.location.pathname.includes(resolvedId)) {
           window.history.replaceState({}, '', `/workbench/${resolvedId}`)
         }
+        // ── Detached agentic loop (composer-initiated build) ─────────────
+        // Fire a Convex generateJob so the build survives a browser close +
+        // runs the stall-retry watchdog server-side. The in-browser stream
+        // (trackedSendMessage below) drives the visible vercel prose + the
+        // GenerateJobCard; the detached job is the survival/build backup.
+        // Composer nav strips ?prompt= above, so BuilderPageWithJob's
+        // Effect#1 (gated on that query) won't double-fire this appId.
+        createJob({
+          appId: resolvedId,
+          prompt: messageContent,
+          model,
+          provider: provider.name,
+        }).catch((e: any) => {
+          logger.error('[createJob] detached generation failed:', e)
+          toast.warn('Detached build job failed to start — in-browser gen still running.')
+        })
       }
       setFakeLoading(true)
       if (autoSelectTemplate) {
@@ -1769,7 +1800,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         ) : (
           /* ── DESKTOP ───────────────────────────────────────────────── */
           <ResizablePanelGroup direction="horizontal" className="h-full">
-            <ResizablePanel defaultSize={42} minSize={28} maxSize={62}>
+            <ResizablePanel defaultSize={25} minSize={18} maxSize={40}>
               <ChatPanel
                 messages={displayMessages} setMessages={setMessages} isStreaming={isLoading || fakeLoading}
                 status={status}
@@ -1792,7 +1823,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
             <ResizableHandle />
 
-            <ResizablePanel defaultSize={58} minSize={38}>
+            <ResizablePanel defaultSize={75} minSize={60}>
               <PanelGroup direction="vertical" className="h-full">
                 <Panel defaultSize={showTerminal ? 70 : 100} minSize={30}>
                   <WorkbenchPreview viewport={viewport} viewportSetter={setViewport} />
@@ -1996,6 +2027,17 @@ const ChatPanel = memo((
           sticky child inside <StickToBottom.Content> — sticky-inside-content
           races the spring on every layout tick and yanks the viewport). ── */}
       <div className="relative flex-1 min-h-0">
+      {messages.length === 0 ? (
+        /* Empty state: inline, NON-scrollable greeting. Previously the empty
+           chat rendered <Greeting> as an ABSOLUTE overlay riding the
+           <StickToBottom.Content modern-scrollbar> scroll surface — which read
+           as a "scrollable element saying ask anything." Now the empty state
+           is a plain flex-centered block with no scroll container; the scroll
+           surface mounts only once there are messages to scroll. */
+        <div className="flex flex-1 min-h-0 items-center justify-center px-3">
+          <Greeting language={language} />
+        </div>
+      ) : (
       <StickToBottom
         className="h-full px-3 pt-4"
         resize="smooth"
@@ -2005,10 +2047,6 @@ const ChatPanel = memo((
         stiffness={0.05}
       >
         <StickToBottom.Content className="flex flex-col gap-2 relative pb-4 modern-scrollbar">
-          {/* F4: old inline empty-state removed — <Greeting> (Messages.client
-              :105-109) is the single authority for the empty workbench. The
-              stale block here rendered the legacy "Describe your idea" bubble
-              and made the redesigned chat "look the same" on empty state. */}
           <ClientOnly>
             {() => (
               <Messages
@@ -2028,6 +2066,7 @@ const ChatPanel = memo((
           <BuilderScrollToBottom />
         </StickToBottom.Content>
       </StickToBottom>
+      )}
 
       {/* Alert/progress overlay — absolute sibling OUTSIDE <StickToBottom>.
           Was a sticky child inside Content, which raced the spring on every
