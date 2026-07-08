@@ -25,6 +25,14 @@ const TWO_MIN_MS = 2 * 60 * 1000;
 const CANCEL_CHECK_INTERVAL_MS = 7_000;
 const SAVE_EVERY_MS = 3_000;
 const SAVE_EVERY_CHARS = 4_000;
+// Chunk-timeout watchdog: abort an attempt whose SSE stream has gone silent
+// for STALL_TIMEOUT_MS, then retry on a fresh AbortController. Up to
+// MAX_STALL_RETRIES+1 attempts → worst-case SILENCE 3 × ~35s ≈ 105s before we
+// give up, which stays under the 120s stale sweeper so a pure-stall row is
+// surfaced as "stalled mid-stream" by us, not "stale" by the sweeper. Recovers
+// stepfun-3.7-flash mid-stream stalls (see memory/maya-nim-stepfun-stall).
+const STALL_TIMEOUT_MS = 30_000;
+const MAX_STALL_RETRIES = 2;
 
 class Cancelled extends Error {
   __cancelled = true as const;
@@ -95,17 +103,34 @@ export async function generateJobsHandler(
   let lastCancelCheck = Date.now();
   let parsedFiles: Array<{ path: string; content: string }> = [];
   let didMark = false;
+  // Stall-watchdog per-attempt state (see memory/maya-nim-stepfun-stall).
+  // stallAborted: set ONLY by the stall-watch closure before aborting;
+  //   read in the catch to branch stall-retry vs cancel vs genuine error.
+  // userCancelled: set ONLY by checkCancel before aborting; read in the catch.
+  // lastChunkAt: bumped on EVERY chunk type (text-delta AND reasoning) so a
+  //   long reasoning phase (deepseek) isn't mistaken for a stall.
+  // stallInterval: per-attempt stall-watch timer; cleared in the outer finally
+  //   and re-armed in the while-opener so attempt N's dead interval never
+  //   fires during attempt N+1.
+  let stallAborted = false;
+  let userCancelled = false;
+  let lastChunkAt = Date.now();
+  let stallInterval: ReturnType<typeof setInterval> | undefined;
+  let attempts = 0;
 
   // Gap A fix: abort the in-flight streamText fetch on cancel so the NIM SSE
   // connection dies immediately. Without this, cancel was polling-only (7s in
   // onChunk) — the stream kept flowing + burning tokens until the 2min stale
   // sweeper caught it. abort() is idempotent; throw Cancelled so the catch arm
   // marks the row 'cancelled' (not 'error').
-  const abortController = new AbortController();
+  // Reassigned per attempt so checkCancel/stall-watch closures always abort the
+  // CURRENT attempt's controller (never a dead prior-attempt one).
+  let attemptAbortController = new AbortController();
   const checkCancel = async () => {
     const fresh = await ctx.runQuery(internal.generateJobs._get, { jobId });
     if (fresh?.status === 'cancelled') {
-      abortController.abort();
+      userCancelled = true;
+      attemptAbortController.abort();
       throw new Cancelled();
     }
   };
@@ -123,10 +148,41 @@ export async function generateJobsHandler(
   // swallow-catch lets the abort() do the actual work (stream errors with
   // AbortError → outer catch). Cleared in finally.
   let cancelInterval: ReturnType<typeof setInterval> | undefined;
+  // Stall-retry loop: when the SSE stream goes silent for STALL_TIMEOUT_MS
+  // (stepfun-3.7-flash mid-stream stall, see memory/maya-nim-stepfun-stall),
+  // abort the attempt + re-stream on a fresh AbortController. Per-attempt
+  // reset so attempt N's partialText/flags/controller never leak into N+1.
+  // Worst-case SILENCE before exhaustion (MAX_STALL_RETRIES+1) × (STALL_TIMEOUT_MS
+  // + poll latency) = 3 × ~35s ≈ 105s < 120s stale sweeper, so a pure-stall row
+  // is surfaced as "stalled mid-stream" by us, not "stale" by the sweeper. Total
+  // wall-clock can exceed 120s when an attempt emits for a while before going
+  // silent — in that degenerate case the sweeper falls back to a (correct) error.
+  while (attempts < MAX_STALL_RETRIES + 1) {
+  if (stallInterval) { clearInterval(stallInterval); stallInterval = undefined; }
+  attemptAbortController = new AbortController();
+  stallAborted = false;
+  userCancelled = false;
+  lastChunkAt = Date.now();
+  partialText = '';
+  lastSaveLen = 0;
+  lastSaveAt = Date.now();
+  lastCancelCheck = Date.now();
+  parsedFiles = [];
+  didMark = false;
+  stallInterval = setInterval(() => {
+    // `>=` + 5s poll ⇒ first poll at/after the 30s threshold fires within ~5s,
+    // so detection latency ≤ 5s (not the 15s a /2 poll would give).
+    if (Date.now() - lastChunkAt >= STALL_TIMEOUT_MS) {
+      stallAborted = true;
+      attemptAbortController.abort();
+    }
+  }, Math.max(Math.floor(STALL_TIMEOUT_MS / 6), 5000));
   try {
-    cancelInterval = setInterval(() => {
-      void checkCancel().catch(() => {});
-    }, CANCEL_CHECK_INTERVAL_MS);
+    if (!cancelInterval) {
+      cancelInterval = setInterval(() => {
+        void checkCancel().catch(() => {});
+      }, CANCEL_CHECK_INTERVAL_MS);
+    }
     const streamResult: any = await streamText({
       messages: [
         {
@@ -146,7 +202,7 @@ export async function generateJobsHandler(
         // Gap A: kill the NIM SSE fetch on cancel. stream-text.ts passes
         // options.* through to _streamText (abortSignal is NOT in its
         // RESERVED_KEYS L238-242), so this reaches AI SDK v6's streamText.
-        abortSignal: abortController.signal,
+        abortSignal: attemptAbortController.signal,
         // AI SDK v6: chunk events. We persist text-delta only; reasoning/tool
         // deltas are intentionally skipped from partialText (those go through
         // a separate UI channel).
@@ -158,6 +214,9 @@ export async function generateJobsHandler(
             partialText += chunk.text;
           }
           const now = Date.now();
+          // Bump on EVERY chunk type (text-delta AND reasoning) — a long
+          // reasoning phase with no text-delta must not trip the stall-watch.
+          lastChunkAt = now;
           if (
             partialText.length - lastSaveLen > SAVE_EVERY_CHARS ||
             now - lastSaveAt > SAVE_EVERY_MS
@@ -233,17 +292,19 @@ export async function generateJobsHandler(
     // consumed. route.ts consumes via toUIMessageStreamResponse() (piped to
     // the HTTP response). This detached handler has no HTTP body to pipe to,
     // so it MUST explicitly drive the stream — awaiting result.text consumes
-    // the full stream, firing onChunk (→ partialText accumulates) and
-    // onFinish (→ markLive/markError + didMark=true). Without this, streamText
-    // returns immediately, onFinish never fires, and the belt-and-braces
-    // fallback below markErrors with "0 chars captured" (the E2E build bug
-    // where every NIM model produced a `live`+0-files job in <200ms).
-    try {
-      await streamResult.text;
-    } catch {
-      // onError already persisted the error; the !didMark fallback below
-      // will markError. Don't rethrow — we want the deterministic fallback.
-    }
+    // the full stream, firing onChunk (→ partialText accumulates + lastChunkAt
+    // bumps on every chunk) and onFinish (→ markLive/markError + didMark=true).
+    // Without this, streamText returns immediately and onFinish never fires
+    // (the E2E build bug where every NIM model produced a `live`+0-files job
+    // in <200ms).
+    //
+    // The stall-watchdog rethrows here: if the SSE went silent for
+    // STALL_TIMEOUT_MS, stall-watch aborted the controller → await text
+    // rejects with AbortError → the outer catch branches on stallAborted to
+    // retry on a fresh controller. User-cancel aborts (userCancelled) and
+    // genuine stream errors likewise propagate. Only onFinish-fired success
+    // + the !didMark fallback below stay in the try (no swallow).
+    await streamResult.text;
 
     // Belt-and-braces: if onFinish didn't fire (rare), derive final from partial.
     if (!didMark) {
@@ -262,13 +323,32 @@ export async function generateJobsHandler(
     }
     return { ok: true, files: parsedFiles.length };
   } catch (e: any) {
-    if (e instanceof Cancelled || e?.__cancelled || e?.name === 'AbortError') {
+    // onFinish already marked a terminal state (live / no-files error) — a
+    // late stall/cancel abort after that must NOT clobber it.
+    if (didMark) return { ok: true, files: parsedFiles.length };
+    // Stall-watch fired (SSE silent > STALL_TIMEOUT_MS) → retry on a fresh
+    // controller; surface exhaustion so the row shows a real error, not a
+    // 2-min "stale" from the sweeper.
+    if (stallAborted) {
+      if (attempts < MAX_STALL_RETRIES) {
+        attempts++;
+        continue;
+      }
+      await ctx.runMutation(internal.generateJobs.markError, {
+        jobId,
+        error: `stalled mid-stream (no chunk for ${STALL_TIMEOUT_MS / 1000}s after ${MAX_STALL_RETRIES + 1} attempts)`,
+      });
+      return { ok: false };
+    }
+    // User cancel (checkCancel set userCancelled before aborting).
+    if (userCancelled || e instanceof Cancelled || e?.__cancelled) {
       await ctx.runMutation(internal.generateJobs.markError, {
         jobId,
         error: 'cancelled',
       });
       return { ok: false, cancelled: true };
     }
+    // Genuine stream error.
     await ctx.runMutation(internal.generateJobs.markError, {
       jobId,
       error:
@@ -279,7 +359,17 @@ export async function generateJobsHandler(
     return { ok: false };
   } finally {
     if (cancelInterval) clearInterval(cancelInterval);
+    if (stallInterval) { clearInterval(stallInterval); stallInterval = undefined; }
   }
+  } // end stall-retry while
+  // Defensive — every stall exhaustion returns inside the catch above, so
+  // reaching past the while is a logical impossibility; the return keeps the
+  // function's Promise return type satisfied.
+  await ctx.runMutation(internal.generateJobs.markError, {
+    jobId,
+    error: `stalled mid-stream (no chunk for ${STALL_TIMEOUT_MS / 1000}s after ${MAX_STALL_RETRIES + 1} attempts)`,
+  });
+  return { ok: false };
 }
 
 /**
