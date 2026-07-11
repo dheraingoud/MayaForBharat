@@ -99,7 +99,10 @@ export async function generateJobsHandler(
 
   await ctx.runMutation(internal.generateJobs._setBuilding, { jobId });
 
-  // Pre-flight: refuse to spend LLM tokens if env is misconfigured.
+  // Pre-flight: refuse to spend LLM tokens if NO keys are configured.
+  // The nimRotator singleton (nim-router.ts) reads NVIDIA_API_KEY_1..20 from
+  // process.env at action-runtime — same source. Don't pin to a single static
+  // key via apiKeys; let nimRotator.nextKey() pick + rotate inside nimFetch.
   const nimKey = readNimApiKey();
   if (!nimKey) {
     await ctx.runMutation(internal.generateJobs.markError, {
@@ -108,10 +111,6 @@ export async function generateJobsHandler(
     });
     return { ok: false };
   }
-  const apiKeys: Record<string, string> = { NvidiaNIM: nimKey };
-  const providerSettings: Record<string, any> = {
-    NvidiaNIM: { enabled: true },
-  };
 
   let partialText = '';
   let lastSaveAt = Date.now();
@@ -238,8 +237,6 @@ export async function generateJobsHandler(
         } as Omit<UIMessage<unknown, any, any>, 'id'>,
       ],
       env: process.env as Record<string, string>,
-      apiKeys,
-      providerSettings,
       promptId: 'default',
       chatMode: 'build',
       designScheme: undefined,

@@ -412,7 +412,11 @@ export function createNimModel(
   overrideKey?: string,
   overrideBaseUrl?: string,
 ): LanguageModel {
-  const effectiveKey = overrideKey || nimRotator.nextKey();
+  // Prefer the rotator when it has keys (env-configured). The overrideKey
+  // (from user settings UI or apiKeys cookie) is only authoritative when
+  // no env keys exist. This lets the 3-key rotation activate for ALL code
+  // paths — detached builds, in-browser chat, plan generation, etc.
+  let effectiveKey = nimRotator.hasKeys ? nimRotator.nextKey() : (overrideKey || '');
 
   if (!effectiveKey) {
     throw new Error(
@@ -636,6 +640,38 @@ export function createNimModel(
       nimRotator.markRateLimited(effectiveKey);
     } else if (response.ok) {
       nimRotator.markHealthy(effectiveKey);
+    }
+
+    // ── Key rotation + retry on 429/503 ──
+    // After marking the failed key, rotate to a different key and retry once.
+    // This ensures the 3-key rotation actually activates for detached builds
+    // (generateJobsHandler) that start with a single static key. Without this,
+    // a 429 "ResourceExhausted: Worker local total request limit reached" or
+    // exhausted 503 kills the stream immediately — the user sees "no parseable
+    // files" even though two other healthy keys are available.
+    if ((response.status === 429 || response.status === 503) && init?.body) {
+      const oldKey = effectiveKey;
+      const nextKey = nimRotator.nextKey();
+      if (nextKey && nextKey !== oldKey) {
+        console.warn(
+          `[NIM Router] ${response.status}: rotating key …${oldKey.slice(-6)} → …${nextKey.slice(-6)}`,
+        );
+        effectiveKey = nextKey;
+        // Update Authorization header on the request init
+        if (init.headers) {
+          const headers = new Headers(init.headers);
+          headers.set('Authorization', `Bearer ${nextKey}`);
+          init = { ...init, headers };
+        }
+        // Retry with the fresh key
+        response = await globalThis.fetch(url, init);
+        // Track the new key's health
+        if (response.status === 429 || response.status === 503) {
+          nimRotator.markRateLimited(nextKey);
+        } else if (response.ok) {
+          nimRotator.markHealthy(nextKey);
+        }
+      }
     }
 
     return response;
