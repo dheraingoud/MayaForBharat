@@ -131,7 +131,7 @@ export default function AppEvolutionPage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
+    <div className="relative min-h-[100dvh] bg-[#F5F4F0] dark:bg-[#1A1917] text-[#1A1917] dark:text-[#F5F4F0] overflow-hidden">
       <ShaderBackground />
 
       <div className="relative z-10">
@@ -161,7 +161,7 @@ export default function AppEvolutionPage() {
             <>
               {/* Header */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-                <h1 className="text-2xl sm:text-3xl font-bold mb-2" style={{ fontFamily: 'var(--font-sora)' }}>
+                <h1 className="text-2xl sm:text-3xl font-bold mb-2" style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}>
                   <TrendingUp className="inline w-6 h-6 text-[#E8601A] mr-2" />
                   {language === 'hi' ? `${appName} का विकास` : `${appName} Evolution`}
                 </h1>
@@ -243,7 +243,7 @@ export default function AppEvolutionPage() {
                   className="text-center py-16 bg-white dark:bg-[#2A2925] rounded-2xl border border-[#E4E1DA] dark:border-white/10"
                 >
                   <TrendingUp className="w-10 h-10 text-[#E4E1DA] dark:text-white/20 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2" style={{ fontFamily: 'var(--font-sora)' }}>
+                  <h3 className="text-lg font-semibold mb-2" style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}>
                     {language === 'hi' ? 'अभी कोई विकास नहीं' : 'No evolutions yet'}
                   </h3>
                   <p className="text-sm text-[#9E9890] max-w-sm mx-auto">
@@ -313,7 +313,7 @@ export default function AppEvolutionPage() {
 
                             <h3
                               className={`font-bold mb-1 ${entry.status === 'discarded' ? 'line-through text-[#9E9890]' : ''}`}
-                              style={{ fontFamily: 'var(--font-sora)' }}
+                              style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}
                             >
                               {entry.title}
                             </h3>
@@ -383,7 +383,7 @@ export default function AppEvolutionPage() {
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-[#E4E1DA] dark:border-white/10 shrink-0">
                 <div>
-                  <h2 className="font-bold text-lg" style={{ fontFamily: 'var(--font-sora)' }}>
+                  <h2 className="font-bold text-lg" style={{ fontFamily: 'var(--font-outfit, var(--font-sora))' }}>
                     {selectedEntry.title}
                   </h2>
                   <p className="text-sm text-[#6B6560] dark:text-[#9E9890] mt-0.5">

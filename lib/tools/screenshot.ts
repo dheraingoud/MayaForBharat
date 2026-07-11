@@ -115,14 +115,44 @@ export const takeSnapshotTool = buildTool({
   },
 })
 
-// ─── Screenshot Diff ──────────────────────────────────────────────────────────
+// ── Screenshot URL (direct utility) ───────────────────────────────────────
 
 /**
- * Gate 5 visual diff wrapper. Since pixelmatch requires heavy canvas/image processing
- * in Node, we instead just ask the Step 3.7 Flash tester agent if the before/after
- * are visually cohesive. (Handled directly in coordinator).
- *
- * This function just verifies both URLs are reachable.
+ * Takes a screenshot of a public URL and returns base64 PNG.
+ * Standalone utility for use by coordinator Gate 5 / verifier agent.
+ */
+export async function screenshotUrl(url: string, waitMs = 3000): Promise<string> {
+  if (!url.startsWith('http')) {
+    throw new Error('URL must be public (http/https)')
+  }
+
+  const res = await fetch(
+    `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&waitFor=${waitMs}`
+  )
+  
+  if (!res.ok) {
+    throw new Error(`Microlink API error: ${res.status} ${res.statusText}`)
+  }
+
+  const data = await res.json()
+  const imageUrl = data?.data?.screenshot?.url
+
+  if (!imageUrl) {
+    throw new Error('Microlink returned no screenshot URL')
+  }
+
+  const imgRes = await fetch(imageUrl)
+  if (!imgRes.ok) throw new Error('Failed to fetch image bytes')
+
+  const arrayBuffer = await imgRes.arrayBuffer()
+  return Buffer.from(arrayBuffer).toString('base64')
+}
+
+// ── Screenshot Diff ──────────────────────────────────────────────────────────
+
+/**
+ * Legacy visual diff wrapper. Kept for backward compatibility.
+ * Gate 5 now uses the M3 verifier agent directly via screenshotUrl + verifyScreenshot.
  */
 export async function screenshotDiff(
   urlBefore: string,
@@ -138,12 +168,10 @@ export async function screenshotDiff(
       return { diffPct: 0, error: 'One or both URLs unreachable' }
     }
 
-    // Since we rely on the Step Flash visual tester agent to actually look at the 
-    // images and determine if the change is good, we don't need a hard pixel diff % here.
-    // Return a soft pass (0) to let the Agent handle the visual QA logic.
     return { diffPct: 0 }
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return { diffPct: 0, error: msg.slice(0, 200) }
   }
 }
+

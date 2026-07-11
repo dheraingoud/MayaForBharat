@@ -76,12 +76,10 @@ export const SKILL_REGISTRY: SkillDefinition[] = [
     contexts: ['builder'],
   },
   {
-    name: 'ui-ux-pro-max',
-    description: 'UI/UX Pro Max — advanced design system patterns and component excellence',
+    name: 'design-taste-frontend-v1',
+    description: 'Anti-slop design skill — premium typography, anti-cliché rules, design variance tuning',
     sources: [
-      'https://raw.githubusercontent.com/nextlevelbuilder/ui-ux-pro-max-skill/main/SKILL.md',
-      'https://raw.githubusercontent.com/nextlevelbuilder/ui-ux-pro-max-skill/main/skill.md',
-      'https://raw.githubusercontent.com/nextlevelbuilder/ui-ux-pro-max-skill/main/README.md',
+      'https://raw.githubusercontent.com/Leonxlnx/taste-skill/main/skills/taste-skill-v1/SKILL.md',
     ],
     contexts: ['builder'],
   },
@@ -197,8 +195,8 @@ export async function getSkillsForContext(
     if (result.status === 'fulfilled' && result.value.content) {
       const { def, content } = result.value
       // Truncate very long skills to 2K chars to preserve context budget
-      const truncated = content.length > 2000
-        ? content.slice(0, 2000) + '\n... [truncated]'
+      const truncated = content.length > 6000
+        ? content.slice(0, 6000) + '\n... [truncated]'
         : content
       results.push(`\n--- SKILL: ${def.name} ---\n${truncated}\n--- END SKILL ---`)
     }

@@ -4,9 +4,19 @@ import { ReactNode, createContext, useContext, useState, useEffect } from 'react
 import { ThemeProvider } from 'next-themes'
 import { ClerkProvider } from '@clerk/nextjs'
 import { ConvexProvider, ConvexReactClient } from 'convex/react'
+import { ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || 'https://example.check.convex.cloud'
-const convex = new ConvexReactClient(convexUrl)
+
+// Lazy-initialize on first client access. Instantiating at module-evaluation
+// time triggered Next.js's `workStore to be initialized` invariant during
+// the root-layout prerender pass.
+let _convex: ConvexReactClient | null = null
+function getConvexClient(): ConvexReactClient {
+  if (!_convex) _convex = new ConvexReactClient(convexUrl)
+  return _convex
+}
 
 export type Language = 'hi' | 'en'
 
@@ -60,7 +70,28 @@ function LanguageProvider({ children }: { children: ReactNode }) {
 function InnerProviders({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-      <LanguageProvider>{children}</LanguageProvider>
+      <LanguageProvider>
+        {children}
+        <ToastContainer
+          position="bottom-right"
+          autoClose={3000}
+          hideProgressBar={false}
+          newestOnTop
+          closeOnClick
+          rtl={false}
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+          theme="dark"
+          toastStyle={{
+            background: '#222120',
+            color: '#F5F4F0',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '10px',
+            fontSize: '13px',
+          }}
+        />
+      </LanguageProvider>
     </ThemeProvider>
   )
 }
@@ -72,7 +103,7 @@ export function Providers({ children }: { children: ReactNode }) {
   // Always wrap with ClerkProvider when a real key is present.
   // SignIn/SignUp components require the provider context.
   const inner = (
-    <ConvexProvider client={convex}>
+    <ConvexProvider client={getConvexClient()}>
       <InnerProviders>{children}</InnerProviders>
     </ConvexProvider>
   )

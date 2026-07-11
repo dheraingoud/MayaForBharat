@@ -1,0 +1,1 @@
+{"version": "0.0.1", "configurations": [{"name": "maya-dev", "runtimeExecutable": "C:/Users/HP/.bun/bin/bun", "runtimeArgs": ["next", "dev"], "port": 3000, "cwd": "C:/Users/HP/OneDrive/Desktop/MAYA/app-maya"}]}

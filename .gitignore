@@ -51,6 +51,12 @@ desktop.ini
 # MAYA build artifacts (generated at runtime)
 .maya-builds/
 
+# Local dev server log (started with `bun run dev 2>&1 | tee .dev.log`)
+.dev.log
+
+# Smoke-test fixture dirs written by /api/deploy-smoke
+builds/
+
 # Debug logs
 npm-debug.log*
 yarn-debug.log*

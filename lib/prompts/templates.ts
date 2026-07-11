@@ -9,15 +9,139 @@
  */
 
 export const MAYA_REGISTRY = `
-COMPONENT GUIDE:
-DO NOT import from "@/components/ui/*" — those files do not exist.
-Instead, build all UI components inline using standard HTML elements + Tailwind CSS classes:
-- Button: <button className="px-4 py-2 rounded-xl bg-primary text-white hover:opacity-90 transition-all">
-- Card: <div className="rounded-2xl border border-white/20 bg-white/70 backdrop-blur-md shadow-lg p-6">
-- Input: <input className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-primary outline-none" />
-- Badge: <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
-- Table: <table className="w-full"><thead><tr className="border-b"><th className="text-left p-3 text-sm font-medium text-gray-500">
-All components MUST be self-contained inline code. Never reference external component libraries.
+COMPONENT GUIDE (shadcn/ui pre-installed):
+You have shadcn/ui components at @/components/ui/*. IMPORT AND USE THEM. You also have cn() from @/lib/utils.
+
+AVAILABLE COMPONENTS:
+- import { Button } from "@/components/ui/button"  // variants: default, destructive, outline, secondary, ghost, link. sizes: default, sm, lg, icon
+- import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
+- import { Input } from "@/components/ui/input"
+- import { Label } from "@/components/ui/label"
+- import { Badge } from "@/components/ui/badge"  // variants: default, secondary, destructive, outline
+- import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
+- import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+- import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+- import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+- import { Separator } from "@/components/ui/separator"
+- import { cn } from "@/lib/utils"
+
+LAYOUT SHELL (use in app/layout.tsx):
+\`\`\`tsx
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Home, Package, Plus, Users, BarChart3, Menu, X } from "lucide-react";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+const NAV = [
+  { href: "/", label: "Dashboard", icon: Home },
+  { href: "/inventory", label: "Inventory", icon: Package },
+  { href: "/add", label: "Add New", icon: Plus },
+  { href: "/customers", label: "Customers", icon: Users },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
+];
+export function Shell({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="min-h-[100dvh] bg-background">
+      <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b">
+        <div className="max-w-7xl mx-auto flex items-center justify-between px-4 h-14">
+          <span className="font-bold text-lg tracking-tight">AppName</span>
+          <nav className="hidden md:flex items-center gap-1">
+            {NAV.map(n => (
+              <Link key={n.href} href={n.href} className={cn("flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors", path === n.href ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-primary/10")}>
+                <n.icon className="w-4 h-4" />{n.label}
+              </Link>
+            ))}
+          </nav>
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</Button>
+        </div>
+        {open && (
+          <div className="md:hidden border-t p-2">
+            {NAV.map(n => (
+              <Link key={n.href} href={n.href} onClick={() => setOpen(false)} className={cn("flex items-center gap-3 px-4 py-3 rounded-lg text-sm", path === n.href ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground")}>
+                <n.icon className="w-4 h-4" />{n.label}
+              </Link>
+            ))}
+          </div>
+        )}
+      </header>
+      <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
+    </div>
+  );
+}
+\`\`\`
+
+DASHBOARD PAGE PATTERN (use Card + Badge):
+\`\`\`tsx
+import { Card, CardContent } from "@/components/ui/card";
+// Stats: grid grid-cols-1 sm:grid-cols-3 gap-4
+// Each stat: <Card><CardContent className="p-5 flex items-center justify-between"><div><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-bold">{value}</p></div><Icon className="w-5 h-5 text-primary" /></CardContent></Card>
+\`\`\`
+
+DATA TABLE PATTERN (use Table component):
+\`\`\`tsx
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+<Card>
+  <CardHeader className="flex-row items-center justify-between">
+    <CardTitle>Items</CardTitle>
+    <Button size="sm"><Plus className="w-4 h-4 mr-1" />Add</Button>
+  </CardHeader>
+  <CardContent>
+    <Table>
+      <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Price</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+      <TableBody>{items.map(item => (
+        <TableRow key={item.id}><TableCell>{item.name}</TableCell><TableCell>{item.price}</TableCell><TableCell><Badge variant="secondary">Active</Badge></TableCell></TableRow>
+      ))}</TableBody>
+    </Table>
+  </CardContent>
+</Card>
+\`\`\`
+
+FORM PATTERN (use Input + Label + Button):
+\`\`\`tsx
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+<form onSubmit={handleSubmit} className="space-y-4">
+  <div className="grid gap-2"><Label htmlFor="name">Name</Label><Input id="name" value={v} onChange={e => setV(e.target.value)} /></div>
+  <Button type="submit" className="w-full">Save</Button>
+</form>
+\`\`\`
+
+DIALOG PATTERN (use Dialog component):
+\`\`\`tsx
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+<Dialog><DialogTrigger asChild><Button>Open</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Confirm</DialogTitle></DialogHeader>{/* content */}<div className="flex gap-3 mt-4"><Button variant="outline" className="flex-1">Cancel</Button><Button className="flex-1">Confirm</Button></div></DialogContent></Dialog>
+\`\`\`
+
+EMPTY STATE PATTERN:
+\`\`\`tsx
+<div className="flex flex-col items-center justify-center py-20 text-center">
+  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+    <Package className="w-8 h-8 text-primary" />
+  </div>
+  <h3 className="text-lg font-bold mb-1">No items yet</h3>
+  <p className="text-sm text-muted-foreground mb-4">Add your first item to get started.</p>
+  <Button><Plus className="w-4 h-4 mr-1" />Add Item</Button>
+</div>
+\`\`\`
+
+ZUSTAND STORE PATTERN:
+\`\`\`tsx
+import { create } from "zustand";
+interface Item { id: string; name: string; price: number; }
+interface Store { items: Item[]; addItem: (item: Omit<Item, "id">) => void; removeItem: (id: string) => void; }
+const useStore = create<Store>((set) => ({
+  items: [],
+  addItem: (item) => set((s) => ({ items: [...s.items, { ...item, id: crypto.randomUUID() }] })),
+  removeItem: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
+}));
+\`\`\`
 `
 
 export const STACK_CONTRACT = `

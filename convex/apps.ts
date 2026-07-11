@@ -32,12 +32,76 @@ export const listAll = query({
 export const removeByAppId = mutation({
   args: { appId: v.string() },
   handler: async (ctx, { appId }) => {
+    // Two "app ids" coexist in the schema:
+    //   - apps.appId (UUID string field) — used by generateJobs.appId (no FK).
+    //   - apps._id (Convex Id<"apps">) — used by improvements.appId + evolutionLog.appId (FK).
+    // Resolve the apps row by UUID first so FK children can be filtered by _id.
+    // generateJobs is cleaned by UUID string regardless (it has no FK and can orphan).
+
+    const jobs = await ctx.db
+      .query("generateJobs")
+      .withIndex("by_app", (q) => q.eq("appId", appId))
+      .collect()
+    for (const row of jobs) await ctx.db.delete(row._id)
+
     const app = await ctx.db
       .query("apps")
       .withIndex("by_app_id", (q) => q.eq("appId", appId))
       .first()
+    let improvements = 0
+    let evolution = 0
     if (app) {
+      const impRows = await ctx.db
+        .query("improvements")
+        .withIndex("by_app", (q) => q.eq("appId", app._id))
+        .collect()
+      improvements = impRows.length
+      for (const row of impRows) await ctx.db.delete(row._id)
+
+      const evoRows = await ctx.db
+        .query("evolutionLog")
+        .withIndex("by_app", (q) => q.eq("appId", app._id))
+        .collect()
+      evolution = evoRows.length
+      for (const row of evoRows) await ctx.db.delete(row._id)
+
       await ctx.db.delete(app._id)
+    }
+    return {
+      deleted: app ? 1 : 0,
+      improvements,
+      evolutionLog: evolution,
+      generateJobs: jobs.length,
+    }
+  },
+})
+
+// ADMIN — wipes every app row. Used by /api/admin/reset for hard-reset.
+export const removeAllApps = mutation({
+  args: { confirm: v.string() },
+  handler: async (ctx, { confirm }) => {
+    if (confirm !== "RESET_APPS") {
+      throw new Error("refusing — pass confirm='RESET_APPS'")
+    }
+    // Cascade: improvements + evolutionLog have indexed refs to apps.
+    // generateJobs uses string appId (no FK). Wipe deepest first.
+    const improvements = await ctx.db.query("improvements").collect()
+    for (const row of improvements) await ctx.db.delete(row._id)
+    const evolution = await ctx.db.query("evolutionLog").collect()
+    for (const row of evolution) await ctx.db.delete(row._id)
+    const jobs = await ctx.db.query("generateJobs").collect()
+    for (const row of jobs) await ctx.db.delete(row._id)
+    const apps = await ctx.db.query("apps").collect()
+    let count = 0
+    for (const row of apps) {
+      await ctx.db.delete(row._id)
+      count++
+    }
+    return {
+      deleted: count,
+      improvements: improvements.length,
+      evolutionLog: evolution.length,
+      generateJobs: jobs.length,
     }
   },
 })
@@ -75,10 +139,13 @@ export const create = mutation({
     ),
     status: v.optional(v.union(
       v.literal("building"),
+      v.literal("preview"),
       v.literal("live"),
       v.literal("evolving"),
-      v.literal("error")
+      v.literal("error"),
+      v.literal("deployed")
     )),
+    deploymentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Check if app already exists
@@ -110,6 +177,7 @@ export const update = mutation({
     id: v.id("apps"),
     status: v.optional(v.string()),
     vercelUrl: v.optional(v.string()),
+    deploymentId: v.optional(v.string()),
     evolutionCount: v.optional(v.number()),
     lastEvolvedAt: v.optional(v.number()),
     shownToOwner: v.optional(v.boolean()),
@@ -130,6 +198,7 @@ export const update = mutation({
     if (args.evolutionCount !== undefined) updates.evolutionCount = args.evolutionCount
     if (args.lastEvolvedAt) updates.lastEvolvedAt = args.lastEvolvedAt
     if (args.shownToOwner !== undefined) updates.shownToOwner = args.shownToOwner
+    if (args.deploymentId) updates.deploymentId = args.deploymentId
     if (args.messages !== undefined) updates.messages = args.messages
     if (Object.keys(updates).length > 0) {
       await ctx.db.patch(args.id, updates)

@@ -4,6 +4,7 @@ import { deployToVercel } from '@/lib/deploy'
 import { addApp } from '@/lib/store'
 import { deriveAppDesign, generateGlobalsCss, FEATURE_TIERS } from '@/lib/design'
 import { getBuildsDir } from '@/lib/path'
+import { checkRateLimit, getRateLimitKey, BUILD_LIMIT } from '@/lib/rate-limit'
 import path from 'path'
 import { promises as fs } from 'fs'
 
@@ -11,6 +12,16 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 export async function POST(request: Request) {
+  // Rate limit: 3 builds per 10 minutes per IP
+  const rlKey = getRateLimitKey(request, 'build')
+  const rl = checkRateLimit(rlKey, BUILD_LIMIT)
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: `Rate limited. Try again in ${rl.retryAfterSeconds}s.` },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } }
+    )
+  }
+
   const body = await request.json()
   const spec: AppSpec = body.spec
   const appId: string = body.appId || crypto.randomUUID()
@@ -110,6 +121,22 @@ export async function POST(request: Request) {
           throw new Error('Build generated no valid files after sanitization')
         }
 
+        // ── Scope Contract: Post-Build Violation Scan ──
+        try {
+          const { scanForScopeViolations, scanPackageJson } = await import('@/lib/scope-contract')
+          const violations = scanForScopeViolations(safeFiles)
+          const bannedDeps = scanPackageJson(safeFiles)
+          if (violations.length > 0) {
+            console.warn(`[api/build] Scope violations detected (${violations.length}):`, violations.slice(0, 5))
+            sendEvent('progress', { message: `Warning: ${violations.length} scope violations detected (non-blocking)` })
+          }
+          if (bannedDeps.length > 0) {
+            console.warn(`[api/build] Banned dependencies found:`, bannedDeps)
+          }
+        } catch (e) {
+          console.warn('[api/build] Scope scan failed (non-fatal):', e)
+        }
+
         let finalFiles = safeFiles
 
         sendEvent('progress', { message: 'Applying unified design system...' })
@@ -119,6 +146,21 @@ export async function POST(request: Request) {
         
         const filteredFiles = finalFiles.filter(f => f.path !== 'app/globals.css' && f.path !== 'styles/globals.css')
         filteredFiles.push({ path: 'app/globals.css', content: globalsCssContent })
+
+        // ── Pre-Deploy Hardening: Deterministic fixes before first deploy ──
+        // Catches 'use client' missing, wrong imports, unused lucide icons, etc.
+        // This prevents the first deploy from failing on easily-fixable issues.
+        try {
+          const { applyDeterministicFixes } = await import('@/lib/voice-pipeline')
+          const { files: hardened, fixCount } = applyDeterministicFixes(filteredFiles)
+          filteredFiles.length = 0
+          filteredFiles.push(...hardened)
+          if (fixCount > 0) {
+            sendEvent('progress', { message: `Pre-deploy: auto-fixed ${fixCount} potential issue${fixCount > 1 ? 's' : ''}` })
+          }
+        } catch (e) {
+          console.warn('[api/build] Pre-deploy hardening skipped:', e)
+        }
 
         const buildDir = getBuildsDir(appId)
         await fs.mkdir(buildDir, { recursive: true })
@@ -130,20 +172,34 @@ export async function POST(request: Request) {
           await fs.writeFile(filePath, file.content, 'utf-8')
         }
 
+        // Add vercel.json to allow iframe embedding from MAYA dashboard
+        const vercelConfig = {
+          headers: [
+            {
+              source: "/(.*)",
+              headers: [
+                { key: "X-Frame-Options", value: "ALLOWALL" },
+                { key: "Content-Security-Policy", value: "frame-ancestors *" },
+              ]
+            }
+          ]
+        }
+        await fs.writeFile(path.join(buildDir, 'vercel.json'), JSON.stringify(vercelConfig, null, 2), 'utf-8')
+
         sendEvent('stage', { stage: 'deploying' })
-        sendEvent('progress', { message: 'Scaffolding Next.js app and deploying to Vercel Preview...' })
+        sendEvent('progress', { message: 'Deploying preview to Vercel...' })
 
         const projectName = spec.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-')
         const token = process.env.DEPLOY_TOKEN
 
         let previewDeployResult: any = null
         let deployAttempts = 0
-        const MAX_DEPLOY_RETRIES = 2
+        const MAX_DEPLOY_RETRIES = 3
 
         while (deployAttempts <= MAX_DEPLOY_RETRIES) {
           deployAttempts++
           
-          // 1. Deploy to preview (with strict typescript config)
+          // Deploy to preview first — user clicks "Go Live" to promote
           previewDeployResult = await deployToVercel({
             appId,
             projectName,
@@ -155,13 +211,19 @@ export async function POST(request: Request) {
             break // Success!
           }
           
-          // Fast auto-fixer for compiler/lucide errors using Stepfun
+          if (deployAttempts > MAX_DEPLOY_RETRIES) break // Don't try to fix after last attempt
+          
+          // Fast auto-fixer: deterministic fixes first, then targeted AI fix
           const { getDeploymentLogs } = await import('@/lib/deploy')
           const logs = await getDeploymentLogs(previewDeployResult.deploymentId || '', token || '')
           
-          sendEvent('progress', { message: 'Compiler error detected. Fast AI auto-fixing...' })
+          sendEvent('progress', { message: `Build error detected (attempt ${deployAttempts}/${MAX_DEPLOY_RETRIES + 1}). Fixing...` })
           const { fixVercelBuildErrors } = await import('@/lib/voice-pipeline')
-          const newFiles = await fixVercelBuildErrors(filteredFiles, logs)
+          const newFiles = await fixVercelBuildErrors(
+            filteredFiles, 
+            logs,
+            (msg) => sendEvent('progress', { message: msg })
+          )
           
           // Update filteredFiles so the final builtApp has the updated code
           filteredFiles.length = 0
@@ -173,42 +235,44 @@ export async function POST(request: Request) {
             await fs.mkdir(path.dirname(filePath), { recursive: true })
             await fs.writeFile(filePath, file.content, 'utf-8')
           }
+          sendEvent('progress', { message: 'Re-deploying with fixes...' })
           continue // loop around and deploy again!
         }
 
         if (!previewDeployResult?.success) {
-          throw new Error('Vercel preview build failed after maximum retries. The AI could not resolve all compiler errors automatically.')
+          throw new Error('Vercel build failed after maximum retries. The AI could not resolve all compiler errors automatically.')
         }
 
-        sendEvent('progress', { message: 'Preview build passed. Promoting to Production...' })
+        sendEvent('progress', { message: 'Preview ready! Running visual verification...' })
 
-        // 2. Deploy to production (with prod config)
-        let existingVercelProjectId: string | undefined = undefined
+        // ── Visual Verification Gate (MAYA-IMPORTANT.md Part 4) ──
+        // Separate VERIFIER model (MiniMax M3) checks the deployed preview.
+        // The Writer (step-3.7-flash) cannot grade its own work.
+        let verificationPassed = true
+        let verificationFindings: unknown[] = []
         try {
-          const { getApp } = await import('@/lib/store')
-          const existingApp = await getApp(appId)
-          if (existingApp?.projectId) {
-            existingVercelProjectId = existingApp.projectId
+          const { quickVerify } = await import('@/lib/visual-verifier')
+          const health = await quickVerify(previewDeployResult.url)
+          verificationPassed = health.healthy
+          if (!health.healthy) {
+            verificationFindings = health.errors
+            console.warn(`[api/build] Visual verification flagged issues:`, health.errors)
+            sendEvent('progress', { message: `⚠️ Verification found ${health.errors.length} issue(s) — preview may have problems.` })
+          } else {
+            sendEvent('progress', { message: '✅ Visual verification passed!' })
           }
         } catch (e) {
-          console.warn('Failed to fetch existing app for vercelProjectId', e)
+          console.warn('[api/build] Visual verification skipped:', e)
         }
 
-        const deployResult = await deployToVercel({
-          appId,
-          projectName,
-          directory: buildDir,
-          target: 'production',
-          vercelProjectId: existingVercelProjectId,
-        })
+        sendEvent('progress', { message: 'Generating summary...' })
 
-        // 3. Generate a quick chat summary
-        sendEvent('progress', { message: 'Generating app summary...' })
-        let summaryText = 'I have built your app! It includes all the requested features and is deployed live.'
+        // Generate a quick chat summary
+        let summaryText = 'Your app preview is ready! Review it and click "Go Live" when you\'re happy.'
         try {
           const { nimChat, MODELS } = await import('@/lib/nim-client')
           const sumRes = await nimChat({
-            model: MODELS.PLANNER, // Use fast model
+            model: MODELS.PLANNER,
             messages: [
               { role: 'system', content: 'You are MAYA, an AI app builder. The user just asked you to build an app. Summarize what you built in 2-3 short, friendly sentences. Be extremely concise. Start with "I have built your app!" or similar.' },
               { role: 'user', content: `App Name: ${spec.name}\nDescription: ${spec.descriptionEn}` }
@@ -219,16 +283,18 @@ export async function POST(request: Request) {
           console.warn('[api/build] Failed to generate summary', e)
         }
 
+        // Save as 'preview' — user must click "Go Live" to promote to production
         const builtApp = {
           id: appId,
           name: spec.name,
           nameHindi: spec.nameHindi,
           descriptionEn: spec.descriptionEn,
           category: spec.category,
-          url: deployResult.url,
-          projectId: deployResult.projectId,
+          url: previewDeployResult.url,
+          projectId: previewDeployResult.projectId,
+          deploymentId: previewDeployResult.deploymentId,
           createdAt: new Date().toISOString(),
-          status: 'live' as const,
+          status: 'preview' as const,
           adminUsername: spec.adminUsername,
           adminPin: spec.adminPin,
           shownToOwner: false,
@@ -243,11 +309,16 @@ export async function POST(request: Request) {
         sendEvent('progress', { message: 'Initializing background intelligence...' })
         const { initAppMemory } = await import('@/lib/memory/autoDream')
         await initAppMemory(buildDir, spec.name, spec.descriptionEn, '').catch(e => console.warn('[api/build] initAppMemory warning:', e))
-        
-        // Trigger initial background improvements
-        _triggerInitialImprovements(appId, spec, deployResult.url).catch(e => console.warn('[api/build] initial improvements warning:', e))
 
-        sendEvent('done', { appId, url: deployResult.url })
+        // Send preview_ready — builder page redirects to app detail with "Go Live" button
+        sendEvent('preview_ready', {
+          appId,
+          url: previewDeployResult.url,
+          deploymentId: previewDeployResult.deploymentId,
+          projectId: previewDeployResult.projectId,
+          verificationPassed,
+          verificationFindings,
+        })
         try { controller.close() } catch (ignore) {}
       } catch (e: unknown) {
         const errorMsg = e instanceof Error ? e.message : String(e)
@@ -274,37 +345,3 @@ export async function POST(request: Request) {
   })
 }
 
-/**
- * After first build goes live, trigger the model to think about what the app
- * lacks and propose 2-3 initial improvements. This seeds the evolution pipeline
- * so the demo has something to show on the very first cron run.
- */
-async function _triggerInitialImprovements(
-  appId: string,
-  spec: { name: string; descriptionEn: string; category: string },
-  vercelUrl: string
-): Promise<void> {
-  // Small delay to let Vercel deploy propagate
-  await new Promise(r => setTimeout(r, 5000))
-
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/evolution`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        appId,
-        name: spec.name,
-        description: spec.descriptionEn,
-        vercelUrl,
-        initialRun: true,
-      }),
-    })
-    if (res.ok) {
-      console.log(`[api/build] Initial improvements triggered for ${appId}`)
-    } else {
-      console.warn(`[api/build] Initial improvements failed: ${res.status}`)
-    }
-  } catch (e) {
-    console.warn('[api/build] Initial improvements fetch error:', e)
-  }
-}

@@ -23,10 +23,13 @@ export default defineSchema({
     category: v.optional(v.string()),
     status: v.union(
       v.literal("building"),
+      v.literal("preview"),
       v.literal("live"),
       v.literal("evolving"),
-      v.literal("error")
+      v.literal("error"),
+      v.literal("deployed")
     ),
+    deploymentId: v.optional(v.string()),
     templateFamily: v.optional(v.union(
       v.literal("kirana"),
       v.literal("services"),
@@ -92,4 +95,38 @@ export default defineSchema({
     ),
     createdAt: v.number(),
   }).index("by_app", ["appId"]),
+
+  // Detached generation jobs — v0-style build persistence.
+  // Lives in a separate table so the build row toggles frequently (pending/building/live/error)
+  // without thrashing the `apps` table that downstream consumers (Vercel deploy, evolution)
+  // observe as the "final" state.
+  generateJobs: defineTable({
+    appId: v.string(),
+    traderId: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("building"),
+      v.literal("live"),
+      v.literal("error"),
+      v.literal("cancelled"),
+    ),
+    prompt: v.string(),
+    model: v.string(),
+    provider: v.string(),
+    partialText: v.optional(v.string()),
+    progressNote: v.optional(v.string()),
+    filesJson: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    // Wall-clock of the last saveProgress (partialText/progressNote) patch —
+    // bumped server-side inside saveProgress every ~SAVE_EVERY_MS (3s) while
+    // chunks flow. The stale sweeper keys off this (falling back to createdAt)
+    // so an ACTIVELY-streaming build that takes >2min to emit files is NOT
+    // killed as "stale." A truly stuck stream (no chunks → no save) still trips
+    // it. See _listBuildingOlderThan + sweepStaleHandler.
+    lastProgressAt: v.optional(v.number()),
+    finishedAt: v.optional(v.number()),
+  })
+    .index("by_app", ["appId"])
+    .index("by_status", ["status"]),
 })

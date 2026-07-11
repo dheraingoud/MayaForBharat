@@ -27,12 +27,14 @@ export interface BuiltApp {
   url: string
   projectId: string
   createdAt: string
-  status: 'live' | 'building'
+  status: 'live' | 'building' | 'preview' | 'error' | 'deployed'
+  deploymentId?: string
   adminUsername?: string
   adminPin?: string
   shownToOwner?: boolean
   messages?: AppMessage[]
   files: Array<{ path: string; content: string }>
+  specJson?: string | null
 }
 
 function getAppDir(id: string): string {
@@ -49,12 +51,14 @@ function mapFromConvex(doc: any): BuiltApp {
     url: doc.vercelUrl || '',
     projectId: doc.vercelProjectId || '',
     createdAt: new Date(doc.createdAt).toISOString(),
-    status: doc.status as 'live' | 'building',
+    status: (doc.status || 'building') as BuiltApp['status'],
+    deploymentId: doc.deploymentId,
     adminUsername: doc.adminUsername,
     adminPin: doc.adminPin,
     shownToOwner: doc.shownToOwner,
     messages: doc.messages || [],
     files: [],
+    specJson: doc.specJson ?? null,
   }
 }
 
@@ -68,10 +72,13 @@ export async function readStore(): Promise<BuiltApp[]> {
   }
 }
 
+// Alias for health-check API
+export const getAllApps = readStore
+
 export async function addApp(app: BuiltApp): Promise<void> {
   try {
     await convex.mutation(api.apps.create, {
-      traderId: "anonymous", // we don't have auth context here, could be passed later
+      traderId: "anonymous",
       appId: app.id,
       name: app.name,
       nameHindi: app.nameHindi,
@@ -79,13 +86,38 @@ export async function addApp(app: BuiltApp): Promise<void> {
       category: app.category,
       vercelUrl: app.url,
       vercelProjectId: app.projectId,
+      deploymentId: app.deploymentId,
       adminUsername: app.adminUsername,
       adminPin: app.adminPin,
       shownToOwner: app.shownToOwner,
       status: app.status,
+      messages: app.messages,
     })
   } catch (e) {
-    console.error("Error adding app to Convex:", e)
+    // If Convex schema hasn't been pushed yet (missing 'preview' literal or deploymentId field),
+    // retry with 'building' status as a backward-compatible fallback
+    console.error("Error adding app to Convex (trying fallback):", e)
+    try {
+      const fallbackStatus = app.status === 'preview' ? 'building' : app.status
+      await convex.mutation(api.apps.create, {
+        traderId: "anonymous",
+        appId: app.id,
+        name: app.name,
+        nameHindi: app.nameHindi,
+        descriptionEn: app.descriptionEn,
+        category: app.category,
+        vercelUrl: app.url,
+        vercelProjectId: app.projectId,
+        adminUsername: app.adminUsername,
+        adminPin: app.adminPin,
+        shownToOwner: app.shownToOwner,
+        status: fallbackStatus as any,
+        messages: app.messages,
+      })
+      console.warn(`[store] Saved app with fallback status '${fallbackStatus}' (Convex schema may need push)`)
+    } catch (fallbackErr) {
+      console.error("Error adding app to Convex (fallback also failed):", fallbackErr)
+    }
   }
 }
 
@@ -116,6 +148,21 @@ export async function updateAppMessages(id: string, messages: AppMessage[]): Pro
     }
   } catch (e) {
     console.error("Error updating app messages in Convex:", e)
+  }
+}
+
+export async function updateApp(id: string, updates: Partial<Pick<BuiltApp, 'status' | 'url' | 'deploymentId'>>): Promise<void> {
+  try {
+    const doc = await convex.query(api.apps.getByAppId, { appId: id })
+    if (doc) {
+      const patch: Record<string, unknown> = {}
+      if (updates.status) patch.status = updates.status
+      if (updates.url) patch.vercelUrl = updates.url
+      if (updates.deploymentId) patch.deploymentId = updates.deploymentId
+      await convex.mutation(api.apps.update, { id: doc._id, ...patch })
+    }
+  } catch (e) {
+    console.error("Error updating app in Convex:", e)
   }
 }
 

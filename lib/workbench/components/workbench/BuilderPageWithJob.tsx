@@ -1,0 +1,487 @@
+'use client';
+
+/*
+ * BuilderPageWithJob — wrapper that mounts the existing BuilderPage only after
+ * a generateJobs row reaches `live`. While the row is in `pending` / `building`
+ * / `error` / `cancelled`, this renders <GenerateJobCard> instead — preserving
+ * the user's tab through browser-closes because the worker lives on Convex.
+ *
+ * Wiring:
+ *   /workbench/[id] page → BuilderPageWithJob(appId, prompt, model, provider)
+ *     on first render if no `live` row exists for appId:
+ *       useEffect → useCreateGenerateJob() → submit
+ *     on first `live` transition:
+ *       useEffect → write files into the already-booted WebContainer singleton,
+ *                   then re-render <BuilderPage appId={appId}/>.
+ */
+
+import { useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
+import { generateId } from 'ai';
+import { toast } from 'react-toastify';
+import { useStore } from '@nanostores/react';
+
+const BUILD_CANCEL_KEY = 'Escape';
+import { workbenchStore } from '@/lib/workbench/stores/workbench';
+import { description as chatDescriptionAtom } from '@/lib/workbench/persistence';
+import { useGenerateJob } from '@/lib/workbench/hooks/useGenerateJob';
+import { useCreateGenerateJob } from '@/lib/workbench/hooks/useCreateGenerateJob';
+import { useCancelGenerateJob } from '@/lib/workbench/hooks/useCancelGenerateJob';
+import {
+  GenerateJobCard,
+} from '@/lib/workbench/components/workbench/GenerateJobCard';
+import { webcontainer } from '@/lib/workbench/webcontainer';
+import { devServerBooting } from '@/lib/workbench/stores/streaming';
+import { useDeployedPreview } from '@/lib/workbench/hooks/useDeployedPreview';
+
+// Importing builder page via dynamic is what /workbench/[id]/page.tsx does today;
+// we reuse that pattern so SSR/WebContainer boot behavior matches.
+const BuilderPage = dynamic(
+  () => import('@/lib/workbench/components/workbench/BuilderPage').then((m) => ({ default: m.BuilderPage })),
+  { ssr: false },
+);
+
+export interface BuilderPageWithJobProps {
+  appId: string;
+  prompt?: string | null;
+  model?: string | null;
+  provider?: string | null;
+}
+
+const WORK_DIR = '/home/project';
+
+async function writeFilesToWebContainer(
+  files: Array<{ path: string; content: string }>,
+): Promise<{ written: number; failed: string[] }> {
+  const container = await webcontainer;
+  const failed: string[] = [];
+  let written = 0;
+
+  // Sort so directories come first (mkdir all parent dirs in one pass before files).
+  const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
+
+  for (const file of sorted) {
+    if (!file.path) continue;
+    // Strip leading slashes; everything lives under WORK_DIR.
+    const rel = file.path.replace(/^\/+/, '');
+    const abs = `${WORK_DIR}/${rel}`;
+    const parent = abs.split('/').slice(0, -1).join('/') || WORK_DIR;
+    try {
+      // mkdir -p the parent (mkdir is a no-op if it already exists).
+      await container.fs.mkdir(parent, { recursive: true }).catch(() => {});
+      await container.fs.writeFile(abs, file.content);
+      written++;
+    } catch (e) {
+      console.error('[BuilderPageWithJob] writeFile failed', abs, e);
+      failed.push(file.path);
+    }
+  }
+
+  return { written, failed };
+}
+
+export function BuilderPageWithJob({
+  appId,
+  prompt,
+  model,
+  provider,
+}: BuilderPageWithJobProps) {
+  const job = useGenerateJob(appId);
+  const createJob = useCreateGenerateJob();
+  const cancelJob = useCancelGenerateJob();
+  const submittedRef = useRef(false);
+  const mountedFileSetRef = useRef<string | null>(null);
+  // Phase C (Bug 2026-07-11): flipped true when a reopen-mid-build hydrated
+  // partial `building` files into the store. Effect#2 reads it on the later
+  // `live` transition to force-overwrite — complete live files MUST replace
+  // the partial building set instead of being gated out by the
+  // survival-vs-visible store-non-empty bail at L210-213.
+  const reopenHydratedRef = useRef(false);
+
+  // Reactive in-browser file map. The detached Convex job and the in-browser
+  // chat stream (BuilderPage's action-runner) both generate the same app; when
+  // the in-browser path has already populated workbenchStore.files, the active
+  // build is owned end-to-end by the chat (EAGER-MOUNT intent below). A detached
+  // sweeper 'error' must NOT yank <BuilderPage> in that case — killing the live
+  // in-browser stream + preview. Only show <GenerateJobCard> when the in-browser
+  // store is ALSO empty (genuine "nothing produced anywhere" failure).
+  const inBrowserFiles = useStore(workbenchStore.files);
+  const inBrowserCount = inBrowserFiles ? Object.keys(inBrowserFiles).length : 0;
+
+  // Deployed-preview-on-reopen (Bug 2026-07-08): read the apps row's deployed
+  // state reactively; stored in a ref so Effect#2 (which closes over mount-time
+  // values) reads the latest. When deployed + vercelUrl, we skip the local
+  // `npm run dev` boot and let Preview.tsx render the deployed URL directly.
+  const deployed = useDeployedPreview(appId);
+  const deployedRef = useRef(deployed);
+  deployedRef.current = deployed;
+
+  // ── 1. On first mount, if the user came in with ?prompt=... AND no live row
+  //      exists yet, kick off a brand-new generation job.
+  useEffect(() => {
+    if (submittedRef.current) return;
+    if (!appId) return;
+    if (!prompt || !model || !provider) return;
+    if (job.status === 'live') return; // already built earlier, no need to submit again
+    if (!job.isReady) return; // first paint — wait for subscription
+
+    // Don't auto-resubmit if there's any recent row (live/error/cancelled).
+    // The user can retry from the card.
+    if (job._id) return;
+
+    submittedRef.current = true;
+    createJob({ appId, prompt, model, provider })
+      .then(() => {
+        toast.info('Generation started', { autoClose: 2500 });
+      })
+      .catch((e: Error) => {
+        submittedRef.current = false; // allow retry
+        toast.error(`Could not start build: ${e.message}`);
+      });
+  }, [appId, prompt, model, provider, job.isReady, job._id, job.status, createJob]);
+
+  // ── 1.5 Esc key on the document cancels an in-flight build (v0-ish).
+  //        Cleaned up on unmount.
+  useEffect(() => {
+    if (job.status !== 'building' && job.status !== 'pending') return;
+    if (!job._id) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== BUILD_CANCEL_KEY) return;
+      // Don't intercept if the user is editing a text input.
+      const t = e.target as HTMLElement | null;
+      const tag = (t?.tagName ?? '').toLowerCase();
+      if (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        (t?.isContentEditable ?? false)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      cancelJob(job._id as string)
+        .then((r) => {
+          if ('ok' in r && r.ok) {
+            toast('Build cancelled', { type: 'info', autoClose: 2000 });
+          }
+        })
+        .catch(() => {
+          // Already-cancelled or stale; silent.
+        });
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [job.status, job._id, cancelJob]);
+
+  // ── 2. When the row reaches `live`, write the files into the WebContainer
+  //      exactly once. After that, hand off to <BuilderPage>.
+  useEffect(() => {
+    if (job.status !== 'live') return;
+
+    // Empty live (model produced no file actions) from the DETACHED Convex
+    // job. The in-browser chat path (BuilderPage's action-runner) runs the
+    // SAME prompt in parallel + writes files into the live WebContainer. If
+    // that path already populated workbenchStore.files — which it does the
+    // moment the model emits any boltAction — the detached `live`+0 row is a
+    // false positive (a stale/old Convex deployment that markLives w/ [] on a
+    // 503/reasoning-only stream, or a parallel race it lost) and MUST NOT
+    // toast "no files" while the user is staring at a working vite preview.
+    // Only surface the toast when the in-browser store is also empty — the
+    // genuine no-files-anywhere case.
+    if (!job.files || job.files.length === 0) {
+      const inBrowserFiles = workbenchStore.files.get();
+      const inBrowserCount = inBrowserFiles ? Object.keys(inBrowserFiles).length : 0;
+      if (inBrowserCount === 0) {
+        try {
+          // Best-effort: clear any modal that may have been set elsewhere so
+          // the workbench doesn't get stuck showing a Terminal Error card.
+          workbenchStore.actionAlert.set(undefined);
+        } catch {
+          /* ignore */
+        }
+        toast.warn('Model returned no files. Try a more specific prompt or retry.', {
+          toastId: 'no-files',
+        });
+      }
+      return;
+    }
+    // Survival-vs-visible gate. The in-browser stream (BuilderPage's
+    // action-runner) and this detached Convex job both generate the same app
+    // concurrently. If the in-browser path already populated
+    // workbenchStore.files, this job's file array is a duplicate source from a
+    // parallel LLM call — SKIP the write so we never clobber the live
+    // WebContainer mid-build. The detached write only matters on the
+    // come-back path: browser was closed mid-build → on reopen files are
+    // empty (nanostore resets) → detached `live` hydrates here.
+    const existingFiles = workbenchStore.files.get();
+    if (Object.keys(existingFiles).length > 0) {
+      // Phase C (Bug 2026-07-11): if the store was populated by a reopen-
+      // mid-build hydration of partial `building` files (reopenHydratedRef),
+      // the complete `live` files MUST replace them — fall through + overwrite
+      // instead of gating out. Otherwise the preview/tree would stay stuck
+      // on the partial set forever (reopen-hydration ran Effect#2.5, not this).
+      if (!reopenHydratedRef.current) return;
+      reopenHydratedRef.current = false;
+      // fall through — the tag guard below still dedupes same-size rewrites.
+    }
+
+    const tag = `${job._id ?? ''}:${job.files.length}`;
+    if (mountedFileSetRef.current === tag) return;
+    mountedFileSetRef.current = tag;
+
+    writeFilesToWebContainer(job.files).then(({ written, failed }) => {
+      // Populate the workbenchFile store so Builders/Preview file tree mirrors the WC.
+      const map: Record<string, any> = {};
+      for (const f of job.files ?? []) {
+        map[f.path] = {
+          type: 'file',
+          content: f.content,
+          isBinary: false,
+        };
+      }
+      workbenchStore.files.set(map as any);
+
+      // Update chat description with the app name if we can find one (best-effort).
+      try {
+        if (!chatDescriptionAtom.get()) {
+          chatDescriptionAtom.set(`Generated app ${(appId ?? '').slice(0, 6)}`);
+        }
+      } catch {}
+
+      if (failed.length > 0) {
+        toast.warn(`Wrote ${written}/${job.files!.length} files (${failed.length} failed)`);
+      } else {
+        toast.success(`Build ready · ${written} files`, { autoClose: 2500 });
+      }
+
+      // Boot the dev server in the WebContainer we just wrote into. BuilderPage's
+      // AutoStart effect (L928) does NOT cover this hydration path: it requires
+      // `hasMessages` (chat history) AND its dep array omits workbenchStore.files,
+      // so a freshly hydrated detached job (no chat, files arrive post-mount)
+      // falls through both guards → preview stays "No preview detected" forever
+      // even though 8 files wrote OK. We reached here only because the in-browser
+      // store was empty (gate at L189), so the in-browser action-runner didn't
+      // emit shell/start actions either — safe to boot here.
+      const previews = workbenchStore.previews.get();
+      // Deployed app reopen: skip the local dev boot — Preview.tsx shows the
+      // deployed Vercel URL directly (Bug 2026-07-08). Files were still written
+      // above so a later local edit can boot without re-fetching.
+      const skipBoot = deployedRef.current.isDeployed && !!deployedRef.current.vercelUrl;
+      if (previews.length === 0 && !skipBoot) {
+        (async () => {
+          // Cross-component double-boot gate (Bug 2026-07-08): on a come-back
+          // reopen BuilderPage's AutoStart AND this Effect#2 can both fire
+          // against the same WebContainer → two concurrent installs + two vite
+          // servers fighting for the same port. The first path to reach the
+          // spawn sets the flag; the second bails.
+          if (devServerBooting.get()) {
+            console.info('[BuilderPageWithJob] dev server already booting — skipping');
+            return;
+          }
+          devServerBooting.set(true);
+          try {
+            const wc = await webcontainer;
+            const { detectProjectCommands } = await import('@/lib/workbench/utils/projectCommands');
+            const fileList = (job.files ?? []).map((f) => ({ path: f.path, content: f.content }));
+            const commands = await detectProjectCommands(fileList);
+            const installCmd = commands.setupCommand || 'npm install --no-audit --no-fund';
+            const startCmd = commands.startCommand || 'npm run dev';
+            const installProc = await wc.spawn('sh', ['-c', installCmd]);
+            const installExit = await installProc.exit;
+            if (installExit !== 0) {
+              console.warn('[BuilderPageWithJob] install exit', installExit, '— trying dev anyway');
+            }
+            await wc.spawn('sh', ['-c', startCmd]); // don't await — runs indefinitely
+          } catch (e) {
+            console.error('[BuilderPageWithJob] dev-server boot failed', e);
+            // Release the boot flag on failure — previews.ts only clears it on
+            // `server-ready`/port-open success, so we must self-clear here or a
+            // competing path / retry would be blocked forever.
+            devServerBooting.set(false);
+          }
+        })();
+      }
+    });
+  }, [job.status, job._id, job.files, appId]);
+
+  // ── 2.5 Reopen-mid-build hydration (Bug 2026-07-11, decision 3): a tab
+  //      closed mid-build reopens while the detached Convex job is still
+  //      `building` and Phase B now patches filesJson every ~3s as files
+  //      stream. Hydrate that server progress so far into the WebContainer +
+  //      workbenchStore + boot the dev server ONCE, so the preview fills
+  //      progressively instead of sitting blank on a <Greeting>. Delta-only
+  //      via tag-guard: each new file batch writes only changed paths, no
+  //      re-install. The slim <SilentBuildStrip> (armed when this effect runs —
+  //      see Effect#3 extension below) shows "Building · cycle N/15" at the top
+  //      of the chat column, so the user sees live progress, never a
+  //      "Building your app" full card.
+  //      Survival-vs-visible: Effect#2's `live` gate stays authoritative for
+  //      the complete-files case; reopenHydratedRef lets Effect#2 overwrite on
+  //      the later `live` transition (covers the partial-set-not-final edge).
+  const hydratedBuildingTagRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (job.status !== 'building') return;
+    if (!job.files || job.files.length === 0) return;
+    if (inBrowserCount > 0) return; // active in-browser build owns the WebContainer
+    const tag = `${job._id ?? ''}:${job.files.length}`;
+    if (hydratedBuildingTagRef.current === tag) return;
+    hydratedBuildingTagRef.current = tag;
+    reopenHydratedRef.current = true; // signal Effect#2 to overwrite on `live`
+
+    (async () => {
+      const { written, failed } = await writeFilesToWebContainer(job.files!);
+      // Mirror into the workbenchFile store so Builders/Preview file tree
+      // mirrors the WC (merge over existing partial set so tree grows).
+      const existing = (workbenchStore.files.get() as Record<string, any>) ?? {};
+      const map: Record<string, any> = { ...existing };
+      for (const f of job.files ?? []) {
+        map[f.path] = { type: 'file', content: f.content, isBinary: false };
+      }
+      workbenchStore.files.set(map as any);
+
+      try {
+        if (!chatDescriptionAtom.get()) {
+          chatDescriptionAtom.set(`Generated app ${(appId ?? '').slice(0, 6)}`);
+        }
+      } catch {}
+
+      if (failed.length > 0) {
+        toast.warn(`Reopen hydrate · wrote ${written} (${failed.length} failed)`, { autoClose: 2500 });
+      }
+
+      // Boot the dev server ONCE for the reopen path (gated by previews empty
+      // + cross-component double-boot flag — mirror Effect#2's L252-290 boot).
+      // Delta batches re-fire this effect but skip install (previews.length>0).
+      const previews = workbenchStore.previews.get();
+      if (previews.length === 0 && !devServerBooting.get()) {
+        devServerBooting.set(true);
+        try {
+          const wc = await webcontainer;
+          const { detectProjectCommands } = await import('@/lib/workbench/utils/projectCommands');
+          const fileList = (job.files ?? []).map((f) => ({ path: f.path, content: f.content }));
+          const commands = await detectProjectCommands(fileList);
+          const installCmd = commands.setupCommand || 'npm install --no-audit --no-fund';
+          const startCmd = commands.startCommand || 'npm run dev';
+          const installProc = await wc.spawn('sh', ['-c', installCmd]);
+          const installExit = await installProc.exit;
+          if (installExit !== 0) {
+            console.warn('[BuilderPageWithJob][reopen] install exit', installExit, '— trying dev anyway');
+          }
+          await wc.spawn('sh', ['-c', startCmd]); // don't await — runs indefinitely
+        } catch (e) {
+          console.error('[BuilderPageWithJob][reopen] dev-server boot failed', e);
+          devServerBooting.set(false); // self-clear on failure (mirror Effect#2)
+        }
+      }
+    })();
+  }, [job.status, job._id, job.files, inBrowserCount, appId]);
+
+  // ── 3. Come-back re-arm (S4 / Q6 durability): reopening an app whose
+  //      apps.fileTree just hydrated (detached `live` wrote files into the
+  //      store via Effect#2) but hasn't reached silentExitReady re-enters the
+  //      silent loop toward a perfect preview instead of stopping at `live`.
+  //      We re-arm the silent atoms only — BuilderPage owns the verify hook
+  //      (usePreviewVerification) + the onVerifyCycle callback that flips
+  //      silentPhase/cycle/exit-ready; its atom→ref sync effect propagates
+  //      this arm into the refs that callback reads. Gates: `live` + files in
+  //      store + not already armed + not already exit-ready, so a fresh build
+  //      (armed at sendMessage, silentBuildActive already true) is never
+  //      double-armed here.
+  const reArmedRef = useRef(false);
+  useEffect(() => {
+    if (reArmedRef.current) return;
+    // Arm on live (canonical signal), OR on building with partial files
+    // (reopen-mid-build hydration — server progress present, keep strip
+    // so user sees build continuing toward perfect).
+    if (job.status !== 'live' && !(job.status === 'building' && job.files && job.files.length > 0)) return;
+    if (inBrowserCount === 0) return;
+    if (workbenchStore.silentBuildActive.get()) return;
+    if (workbenchStore.silentExitReady.get()) return;
+    reArmedRef.current = true;
+    workbenchStore.silentBuildActive.set(true);
+    workbenchStore.silentPhase.set('verifying');
+    workbenchStore.silentCycle.set(1);
+  }, [job.status, inBrowserCount]);
+
+  // ── Render:
+  //   EAGER-MOUNT (fixes "generation doesn't happen" + "commands don't run"
+  //   + "chat redesign invisible"): for a fresh ?prompt= (and any active
+  //   build — pending/building/live) mount <BuilderPage> IMMEDIATELY so its
+  //   in-browser auto-prompt effect (BuilderPage ~L1007) fires. That effect
+  //   drives the VISIBLE generation — it streams the build into the chat
+  //   (file cards, shell/start status, the redesigned chat tree) AND the
+  //   action-runner executes the emitted bolt shell/start actions
+  //   (npm install && npm run dev) so the dev server boots and the preview
+  //   loads. All of that was unreachable before because this wrapper parked
+  //   the user on a <GenerateJobCard> spinner for the whole detached build —
+  //   BuilderPage never mounted, the chat stayed empty, AutoStart bailed on
+  //   `hasMessages`, and npm install/dev never ran.
+  //
+  //   The detached Convex job still runs in parallel (created above) as a
+  //   survival backup: if the user closes the tab, the job completes
+  //   server-side; on reopen its `live` files hydrate the WebContainer —
+  //   gated in the effect above on workbenchStore.files being empty so it
+  //   never clobbers the in-browser path's live files.
+  //
+  //   The GenerateJobCard is shown ONLY for an explicit retry of a
+  //   failed/cancelled job (has a row + error/cancelled status). The active
+  //   build is now owned end-to-end by the chat.
+  const showCard =
+    !!job._id &&
+    (job.status === 'error' || job.status === 'cancelled') &&
+    inBrowserCount === 0; // active in-browser build (files in store) owns the view
+
+  if (showCard) {
+    return (
+      <GenerateJobCard
+        appId={appId}
+        job={job}
+        onCancel={async () => {
+          if (!job._id) return;
+          const r = await cancelJob(job._id as string);
+          if ('ok' in r && r.ok) toast('Build cancelled', { type: 'info' });
+        }}
+        onRetry={async () => {
+          // Come-back durability: prefer the fresh URL triplet, fall back to
+          // the triplet persisted on the generateJobs row (useGenerateJob now
+          // surfaces job.prompt/model/provider). Without this, a dashboard
+          // come-back (no query) bails here -> "all gone" dead-end.
+          const p = prompt ?? job.prompt;
+          const m = model ?? job.model;
+          const pr = provider ?? job.provider;
+          if (!p || !m || !pr) {
+            toast.error('Missing original prompt — open the dashboard to retry.');
+            return;
+          }
+          submittedRef.current = false;
+          mountedFileSetRef.current = null;
+          try {
+            await createJob({ appId, prompt: p, model: m, provider: pr });
+            toast.info('Retrying build');
+          } catch (e: any) {
+            toast.error(`Retry failed: ${e.message}`);
+          }
+        }}
+        onBuild={async () => {
+          // Same persisted-triplet fallback as onRetry (come-back durability).
+          const p = prompt ?? job.prompt;
+          const m = model ?? job.model;
+          const pr = provider ?? job.provider;
+          if (!p || !m || !pr) {
+            toast.error('Missing original prompt.');
+            return;
+          }
+          submittedRef.current = false;
+          mountedFileSetRef.current = null;
+          try {
+            await createJob({ appId, prompt: p, model: m, provider: pr });
+          } catch (e: any) {
+            toast.error(`Build failed: ${e.message}`);
+          }
+        }}
+      />
+    );
+  }
+
+  return <BuilderPage appId={appId} />;
+}

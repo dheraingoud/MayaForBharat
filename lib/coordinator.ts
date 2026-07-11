@@ -468,12 +468,13 @@ export async function runEvolutionCycle(
         continue
       }
 
-      // ── GATE 5: Vercel Preview Visual QA ───────────────────────────────────
-      // If tests pass, deploy a preview to Vercel and diff it against production.
+      // ── GATE 5: Visual QA via MiniMax M3 Verifier ─────────────────────────────
+      // Instead of naive pixel diff, we use a separate vision model (M3) to
+      // evaluate the preview screenshot with a skeptical prompt.
       let previewUrl = ''
       try {
         const { deployToVercel, deleteVercelDeployment } = await import('./deploy')
-        const { screenshotDiff } = await import('./tools/screenshot')
+        const { verifyScreenshot } = await import('./agents/verifier')
 
         console.log(`[coordinator] Deploying Preview for Gate 5: ${proposal.titleEn}`)
         const preview = await deployToVercel({
@@ -486,21 +487,33 @@ export async function runEvolutionCycle(
         previewUrl = preview.url
         console.log(`[coordinator] Preview deployed: ${previewUrl}`)
 
-        // Ask the visual tester agent (via screenshot.ts diff) to evaluate
-        const diffResult = await screenshotDiff(app.vercelUrl, previewUrl)
-        
-        if (diffResult.diffPct > 5) {
-          result.gateFailures.push({ gate: 'visual_regression', count: 1 })
-          await deleteVercelDeployment(previewUrl).catch(() => {})
-          await discardWorktree(wtInfo)
-          continue
+        // Take screenshot of the preview
+        let screenshotBase64 = ''
+        try {
+          const { screenshotUrl } = await import('./tools/screenshot')
+          screenshotBase64 = await screenshotUrl(previewUrl)
+        } catch (screenshotErr) {
+          console.warn('[coordinator] Screenshot capture failed (soft-pass):', String(screenshotErr).slice(0, 200))
+        }
+
+        if (screenshotBase64) {
+          // Send to MiniMax M3 verifier (NOT the builder model)
+          const verdict = await verifyScreenshot(screenshotBase64, app.description || app.name)
+          console.log(`[coordinator] Verifier verdict: score=${verdict.score}, passed=${verdict.passed}, issues=${verdict.issues.length}`)
+          
+          if (!verdict.passed) {
+            result.gateFailures.push({ gate: `visual_qa:${verdict.score}`, count: 1 })
+            await deleteVercelDeployment(previewUrl).catch(() => {})
+            await discardWorktree(wtInfo)
+            continue
+          }
         }
 
         // Cleanup the preview deployment to keep dashboard clean
         await deleteVercelDeployment(previewUrl).catch(() => {})
         
       } catch (e) {
-        // Soft-fail: if preview deployment or visual QA fails (e.g. no deploy token, Microlink rate limit)
+        // Soft-fail: if preview deployment or visual QA fails (e.g. no deploy token, API rate limit)
         // we DO NOT discard the build. We allow it to merge (v0 behavior fallback).
         console.warn(`[coordinator] Gate 5 visual QA failed (soft-pass):`, String(e).slice(0, 200))
         if (previewUrl) {

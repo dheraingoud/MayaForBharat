@@ -8,7 +8,7 @@ export default function SignUpPage() {
 
   if (!hasClerkKey) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-5 bg-[#F5F4F0] dark:bg-[#1A1917]">
+      <div className="min-h-[100dvh] flex items-center justify-center px-5 bg-[#F5F4F0] dark:bg-[#1A1917]">
         <div className="w-full max-w-md text-center">
           <div className="bg-white dark:bg-[#2A2925] rounded-3xl border border-[#E4E1DA] dark:border-white/10 p-8 shadow-sm">
             <div className="text-5xl mb-4">🔒</div>
@@ -23,7 +23,7 @@ export default function SignUpPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-5 bg-[#F5F4F0] dark:bg-[#1A1917]">
+    <div className="min-h-[100dvh] flex items-center justify-center px-5 bg-[#F5F4F0] dark:bg-[#1A1917]">
       <div className="w-full max-w-md">
         <SignUp fallbackRedirectUrl="/record"
           appearance={{

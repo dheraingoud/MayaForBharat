@@ -1,0 +1,162 @@
+/*
+ * builder-overrides.css
+ * 
+ * CSS overrides to make bolt.diy Chat and Preview components
+ * match the gorgeous MAYA builder design language.
+ *
+ * Theme: Dark (#1A1917), accent (#E8601A), clean minimal typography
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHAT PANEL — Match AppChat's gorgeous dark theme
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Force the chat container to use our dark bg */
+.builder-chat-wrapper {
+  --bolt-elements-bg-depth-1: #1A1917;
+  --bolt-elements-bg-depth-2: #222120;
+  --bolt-elements-bg-depth-3: #2A2925;
+  --bolt-elements-bg-depth-4: #111110;
+}
+
+/* Hide the model/provider selector bar in the Chat component header */
+.builder-chat-wrapper [class*="ModelSelector"],
+.builder-chat-wrapper [class*="ProviderSelector"],
+.builder-chat-wrapper [class*="APIKeyManager"],
+.builder-chat-wrapper [class*="api-key"],
+.builder-chat-wrapper [class*="apiKey"] {
+  display: none !important;
+}
+
+/* Force chat background */
+.builder-chat-wrapper .bg-bolt-elements-background-depth-1 {
+  background-color: #1A1917 !important;
+}
+
+.builder-chat-wrapper .bg-bolt-elements-background-depth-2 {
+  background-color: #222120 !important;
+}
+
+/* User message bubbles — orange like AppChat */
+.builder-chat-wrapper [data-role="user"] {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.builder-chat-wrapper [data-role="user"] .bg-bolt-elements-messages-userMessage {
+  background-color: #E8601A !important;
+  color: white !important;
+  border-radius: 18px !important;
+  border-top-right-radius: 4px !important;
+  max-width: 85%;
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+
+/* Assistant messages — clean, no bg, subtle text */
+.builder-chat-wrapper [data-role="assistant"] .prose {
+  color: #D4D0CA !important;
+  line-height: 1.55 !important;
+}
+
+/* Textarea / input area styling */
+.builder-chat-wrapper textarea {
+  background-color: transparent !important;
+  color: #F5F4F0 !important;
+  font-size: 13px !important;
+}
+
+.builder-chat-wrapper textarea::placeholder {
+  color: #6B6560 !important;
+}
+
+/* Send button — orange accent */
+.builder-chat-wrapper [class*="sendButton"],
+.builder-chat-wrapper button[aria-label="Send"] {
+  background-color: #E8601A !important;
+  color: white !important;
+}
+
+/* Input container */
+.builder-chat-wrapper .bg-bolt-elements-prompt-background {
+  background-color: #222120 !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 12px !important;
+}
+
+.builder-chat-wrapper .bg-bolt-elements-prompt-background:focus-within {
+  border-color: rgba(232, 96, 26, 0.2) !important;
+}
+
+/* Scrollbar styling */
+.builder-chat-wrapper ::-webkit-scrollbar {
+  width: 4px;
+}
+
+.builder-chat-wrapper ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.builder-chat-wrapper ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+.builder-chat-wrapper ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PREVIEW — Match builder's browser chrome aesthetic
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Preview toolbar — darker, more refined */
+.builder-preview-wrapper .bg-bolt-elements-background-depth-2 {
+  background-color: #161514 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Preview address bar — subtle, monospacd */
+.builder-preview-wrapper .bg-bolt-elements-preview-addressBar-background {
+  background-color: #1A1917 !important;
+  border-color: rgba(255, 255, 255, 0.04) !important;
+  font-family: monospace !important;
+  font-size: 10px !important;
+}
+
+/* Preview address bar text */
+.builder-preview-wrapper .text-bolt-elements-preview-addressBar-text {
+  color: #6B6560 !important;
+}
+
+/* Preview iframe container */
+.builder-preview-wrapper .bg-bolt-elements-background-depth-4 {
+  background-color: #0A0A09 !important;
+}
+
+/* No preview message styling */
+.builder-preview-wrapper .text-bolt-elements-textSecondary {
+  color: #6B6560 !important;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TERMINAL — Dark theme integration
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Terminal background */
+.bg-bolt-elements-terminals-background {
+  background-color: #111110 !important;
+}
+
+/* Terminal tab bar */
+.bg-bolt-elements-terminals-buttonBackground {
+  background-color: #222120 !important;
+}
+
+/* Terminal text colors */
+.text-bolt-elements-terminals-text {
+  color: #D4D0CA !important;
+}
