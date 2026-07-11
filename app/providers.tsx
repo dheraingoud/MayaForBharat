@@ -56,14 +56,14 @@ function LanguageProvider({ children }: { children: ReactNode }) {
     return (
       <LanguageContext.Provider value={{ language: 'hi', setLanguage: () => {} }}>
         {children}
-      </LanguageContext.Provider>
+     </LanguageContext.Provider>
     )
   }
 
   return (
     <LanguageContext.Provider value={{ language, setLanguage: handleLanguageChange }}>
       {children}
-    </LanguageContext.Provider>
+   </LanguageContext.Provider>
   )
 }
 
@@ -91,30 +91,33 @@ function InnerProviders({ children }: { children: ReactNode }) {
             fontSize: '13px',
           }}
         />
-      </LanguageProvider>
-    </ThemeProvider>
+     </LanguageProvider>
+   </ThemeProvider>
   )
 }
 
 export function Providers({ children }: { children: ReactNode }) {
   const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-  const hasClerkKey = clerkKey && clerkKey.trim().length > 0 && !clerkKey.startsWith('pk_test_disable')
+  const hasClerkKey = !!clerkKey && clerkKey.trim().length > 0 && !clerkKey.startsWith('pk_test_disable')
 
-  // Always wrap with ClerkProvider when a real key is present.
-  // SignIn/SignUp components require the provider context.
   const inner = (
     <ConvexProvider client={getConvexClient()}>
       <InnerProviders>{children}</InnerProviders>
-    </ConvexProvider>
+  </ConvexProvider>
   )
 
-  if (!hasClerkKey) {
-    return inner
-  }
+  // ALWAYS mount ClerkProvider — even on local dev without a publishable key —
+  // so that `useAuth` / `<SignedIn>` / `<SignedOut>` hooks called anywhere in
+  // the tree (Navigation, page.tsx mic/send gate, dashboard, workbench) never
+  // throw "useAuth can only be used within the <ClerkProvider /> component".
+  // With no real key, Clerk accepts a dummy `pk_test_disabled_no_op` key and
+  // every user falls back to "signedOut" — exactly the desired graceful
+  // degradation path used by sign-in/sign-up pages.
+  const safePublishKey = hasClerkKey ? (clerkKey as string) : 'pk_test_disabled_no_op'
 
   return (
     <ClerkProvider
-      publishableKey={clerkKey}
+      publishableKey={safePublishKey}
       appearance={{
         baseTheme: undefined,
         variables: {
@@ -124,6 +127,6 @@ export function Providers({ children }: { children: ReactNode }) {
       }}
     >
       {inner}
-    </ClerkProvider>
+  </ClerkProvider>
   )
 }

@@ -4,19 +4,7 @@ import { motion } from 'framer-motion'
 import { useLanguage } from '@/app/providers'
 import { useRouter, usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
-
-// Conditionally import Clerk — graceful fallback if not configured
-let useAuth: () => { isLoaded: boolean; isSignedIn: boolean | undefined }
-let UserButton: React.ComponentType<{ appearance?: Record<string, unknown> }>
-
-try {
-  const clerk = require('@clerk/nextjs')
-  useAuth = clerk.useAuth
-  UserButton = clerk.UserButton
-} catch {
-  useAuth = () => ({ isLoaded: true, isSignedIn: false })
-  UserButton = () => null
-}
+import { useAuth, UserButton } from '@clerk/nextjs'
 
 // ─── Animation Constants ─────────────────────────────────────────────────────
 
@@ -44,9 +32,7 @@ export function Navigation() {
     !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
     !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.startsWith('pk_test_disable')
 
-  const { isLoaded, isSignedIn } = hasClerk
-    ? useAuth()
-    : { isLoaded: true, isSignedIn: false }
+  const { isLoaded, isSignedIn } = useAuth()
 
   // Only show on landing page
   const isLander = pathname === '/'
@@ -119,7 +105,7 @@ export function Navigation() {
             </div>
 
             {/* ── User Avatar / Sign In ───────────────────────────────── */}
-            {hasClerk && isLoaded && isSignedIn && (
+            {isLoaded && isSignedIn && (
               <div className="flex items-center">
                 <UserButton
                   appearance={{

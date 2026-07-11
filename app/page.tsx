@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { useAuth, SignInButton } from '@clerk/nextjs'
 import { Navigation } from '@/components/navigation'
 import { ShaderBackground } from '@/components/shader-background'
 import ReactMarkdown from 'react-markdown'
@@ -64,6 +65,7 @@ declare global {
 
 export default function LandingPage() {
   const router = useRouter()
+  const { isSignedIn, isLoaded } = useAuth()
   const [mounted, setMounted] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [currentScriptIdx, setCurrentScriptIdx] = useState(0)
@@ -280,17 +282,33 @@ export default function LandingPage() {
   }, [])
 
   const handleMicToggle = useCallback(() => {
+    // M6: gate behind Clerk auth — clicking mic when signed-out redirects to
+    // /sign-in instead of starting a doomed Web Speech session.
+    if (isLoaded && !isSignedIn) {
+      router.push('/sign-in')
+      return
+    }
     if (isMicActive) {
       stopListening()
     } else {
       startListening()
     }
-  }, [isMicActive, startListening, stopListening])
+  }, [isMicActive, isLoaded, isSignedIn, startListening, stopListening, router])
 
   // ── Submit → Plan-first chat flow ──────────────────────────────────────────
   const handleSubmit = useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (!prompt.trim()) return
+
+    // M6: auth gate — sending a prompt while signed-out routes to /sign-in.
+    // Returning early prevents the planning chat from streaming with an
+    // anonymous identity (the workbench-side would 401 anyway on first
+    // mutation; better to fail fast at the entry point).
+    if (isLoaded && !isSignedIn) {
+      router.push('/sign-in')
+      return
+    }
+
     stopListening()
 
     const userPrompt = prompt.trim()
@@ -376,7 +394,7 @@ export default function LandingPage() {
       }
       window.location.href = `/workbench?prompt=${encodeURIComponent(prompt.trim())}&model=${encodeURIComponent(activeTier.model)}&provider=${encodeURIComponent(activeTier.provider)}&tierIdx=${selectedTier}`
     }
-  }, [prompt, stopListening, activeTier, selectedTier])
+  }, [prompt, stopListening, activeTier, selectedTier, isLoaded, isSignedIn, router])
 
   const handleApprove = useCallback(() => {
     if (planData) {
@@ -514,31 +532,63 @@ export default function LandingPage() {
                 Speak your idea. We build the app.
               </p>
 
-              {/* ── Mic Button (under hero) ──────────────────────────────── */}
-              <div className="relative flex items-center justify-center">
-                {/* M5: static radial wash replaces the neon glow-ring orb + the
-                    pulsing mic-rings (no neon box-shadow). The double-bezel
-                    disc on .mic-btn carries the rest of the listening cue. */}
-                <span className="mic-radial-wash" />
+              {isLoaded && !isSignedIn && (
+                <div className="flex flex-col items-center gap-3 w-full max-w-md">
+                  <div className="rounded-2xl bg-white/70 dark:bg-[#222120]/70 ring-1 ring-[#E4E1DA] dark:ring-white/[0.08] backdrop-blur-md px-5 py-4 flex items-center gap-4 shadow-sm">
+                    <div className="w-10 h-10 rounded-full bg-[#E8601A]/10 ring-1 ring-[#E8601A]/20 flex items-center justify-center shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E8601A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                     </svg>
+                   </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-[#1A1917] dark:text-[#F5F4F0] leading-tight">
+                        Sign in to start building
+                     </p>
+                      <p className="text-xs text-[#6B6560] dark:text-[#9E9890] leading-tight mt-0.5">
+                        Microphone + AI build are enabled after a quick sign-in.
+                     </p>
+                   </div>
+                 </div>
+                  <SignInButton mode="redirect" forceRedirectUrl="/">
+                    <button
+                      type="button"
+                      className="plan-btn-primary"
+                      style={{ padding: "10px 24px", fontSize: 13 }}
+                    >
+                      Sign in to continue →
+                   </button>
+                 </SignInButton>
+               </div>
+             )}
 
-                <button
-                  onClick={handleMicToggle}
-                  className={`mic-btn ${isMicActive ? 'mic-active' : ''}`}
-                  aria-label={isMicActive ? 'Stop listening' : 'Start speaking'}
-                >
-                  {isMicActive ? (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg>
-                  ) : (
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" y1="19" x2="12" y2="22" />
-                    </svg>
-                  )}
-                </button>
-              </div>
+              {isLoaded && isSignedIn && (
+                <>
+                  {/* ── Mic Button (under hero) ──────────────────────────────── */}
+                  <div className="relative flex items-center justify-center">
+                  {/* M5: static radial wash replaces the neon glow-ring orb + the
+                      pulsing mic-rings (no neon box-shadow). The double-bezel
+                      disc on .mic-btn carries the rest of the listening cue. */}
+                  <span className="mic-radial-wash" />
+  
+                  <button
+                    onClick={handleMicToggle}
+                    className={`mic-btn ${isMicActive ? 'mic-active' : ''}`}
+                    aria-label={isMicActive ? 'Stop listening' : 'Start speaking'}
+                  >
+                    {isMicActive ? (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                      </svg>
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
 
               {/* Mic status hint + wave bars */}
               {isMicActive && (
@@ -628,6 +678,7 @@ export default function LandingPage() {
                   </button>
                 </div>
               </form>
+            </>)}
             </div>
           </main>
         )}
