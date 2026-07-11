@@ -412,11 +412,7 @@ export function createNimModel(
   overrideKey?: string,
   overrideBaseUrl?: string,
 ): LanguageModel {
-  // Prefer the rotator when it has keys (env-configured). The overrideKey
-  // (from user settings UI or apiKeys cookie) is only authoritative when
-  // no env keys exist. This lets the 3-key rotation activate for ALL code
-  // paths — detached builds, in-browser chat, plan generation, etc.
-  let effectiveKey = nimRotator.hasKeys ? nimRotator.nextKey() : (overrideKey || '');
+  let effectiveKey = overrideKey || nimRotator.nextKey();
 
   if (!effectiveKey) {
     throw new Error(
