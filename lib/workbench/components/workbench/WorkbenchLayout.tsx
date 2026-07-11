@@ -25,6 +25,7 @@ import { TerminalTabs } from '@/lib/workbench/components/workbench/terminal/Term
 import { Chat } from '@/lib/workbench/components/chat/Chat.client';
 import { ClientOnly } from '@/lib/workbench/components/ui/ClientOnly';
 import { ChatDescription } from '@/lib/workbench/persistence/ChatDescription';
+import { GitHubSnapshotButton } from '@/lib/workbench/components/workbench/GitHubSnapshotButton';
 import type { ElementInfo } from '@/lib/workbench/components/workbench/Inspector';
 
 type ViewportMode = 'desktop' | 'tablet' | 'mobile';
@@ -107,8 +108,9 @@ const WorkbenchHeader = memo(({
         </div>
       </div>
 
-      {/* ── Right: terminal toggle ───────────────────────────────── */}
+      {/* ── Right: GitHub snapshot + terminal toggle ──────────────── */}
       <div className="flex items-center gap-2 shrink-0">
+        <GitHubSnapshotButton />
         <button
           onClick={onToggleTerminal}
           className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg transition-all ${

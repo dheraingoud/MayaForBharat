@@ -25,7 +25,15 @@ const lookupSavedPassword = (url: string) => {
 
 const saveGitAuth = (url: string, auth: GitAuth) => {
   const domain = url.split('/')[2];
-  Cookies.set(`git:${domain}`, JSON.stringify(auth));
+  // SECURITY (2026-07-11): cookie hardening — sameSite=lax blocks CSRF,
+  // Secure blocks non-HTTPS exfil. HttpOnly must be set server-side;
+  // that's deferred until we route auth via a server cookie endpoint.
+  Cookies.set(`git:${domain}`, JSON.stringify(auth), {
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    expires: 30,
+  });
 };
 
 export function useGit() {
@@ -178,7 +186,164 @@ export function useGit() {
     [webcontainer, fs, ready],
   );
 
-  return { ready, gitClone };
+  // ── Snapshot API (post-clone commit + push) ───────────────────────────
+  // Workflow: clone repo → edit files in WebContainer → click "Snapshot"
+  // → we stage dirty files, commit, and push to GitHub.
+
+  const gitEnsureRepo = useCallback(async () => {
+    if (!webcontainer || !fs || !ready) {
+      throw new Error('Webcontainer not initialized. Please try again later.');
+    }
+
+    const workdir = webcontainer.workdir;
+
+    try {
+      const has = await fs.promises.stat(`${workdir}/.git`).catch(() => null);
+      if (has) return;
+    } catch {
+      /* init below */
+    }
+
+    await git.init({ fs, dir: workdir, defaultBranch: 'main' });
+
+    // Default .gitignore so statusMatrix skips generated dirs.
+    // node_modules alone is too large to push.
+    const defaultIgnore = [
+      'node_modules/',
+      '.next/',
+      'dist/',
+      '.vercel/',
+      '*.log',
+      '.env',
+      '.env.local',
+      '.DS_Store',
+      'bun.lockb',
+      'package-lock.json',
+      '.maya/',
+    ].join('\n');
+
+    await fs.promises
+      .writeFile(`${workdir}/.gitignore`, defaultIgnore, 'utf-8')
+      .catch((e: unknown) => console.warn('useGit: failed to write .gitignore', e));
+  }, [webcontainer, fs, ready]);
+
+  const gitCurrentBranch = useCallback(async (): Promise<string> => {
+    if (!webcontainer || !fs || !ready) throw new Error('Webcontainer not initialized.');
+    const branches = await git.listBranches({ fs, dir: webcontainer.workdir });
+    if (branches.includes('main')) return 'main';
+    if (branches.length > 0) return branches[0]!;
+    return 'main';
+  }, [webcontainer, fs, ready]);
+
+  /**
+   * Stage every changed file (excluding node_modules etc.) and commit.
+   * Returns the commit SHA.
+   */
+  const gitCommit = useCallback(
+    async (message: string) => {
+      if (!webcontainer || !fs || !ready) {
+        throw new Error('Webcontainer not initialized. Please try again later.');
+      }
+
+      const workdir = webcontainer.workdir;
+      await gitEnsureRepo();
+
+      const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '.vercel', '.maya']);
+      const SKIP_FILES = new Set([
+        '.DS_Store',
+        '.env',
+        '.env.local',
+        'bun.lockb',
+        'package-lock.json',
+      ]);
+
+      const matrix = (await git.statusMatrix({
+        fs,
+        dir: workdir,
+        filter: (filepath) => {
+          if (!filepath || filepath === '.') return false;
+          return !filepath.split('/').some((p) => SKIP_DIRS.has(p));
+        },
+      })) as Array<[string, number, number, number]>;
+
+      for (const [filepath, headCode, workdirCode, stageCode] of matrix) {
+        if (SKIP_FILES.has(filepath)) continue;
+
+        // Stage anything where workdir ≠ stage, or stage ≠ HEAD.
+        if (workdirCode !== stageCode || headCode !== stageCode) {
+          try {
+            await git.add({ fs, dir: workdir, filepath });
+          } catch (err) {
+            console.warn(`useGit: failed to add ${filepath}`, err);
+          }
+        }
+      }
+
+      const sha = await git.commit({
+        fs,
+        dir: workdir,
+        message,
+        author: { name: 'MAYA', email: 'noreply@maya.local' },
+      });
+
+      return sha;
+    },
+    [webcontainer, fs, ready, gitEnsureRepo],
+  );
+
+  /**
+   * Push the current branch to origin using stored GitHub credentials.
+   * Requires GitHub connection (cookie 'githubToken') and a configured
+   * 'origin' remote (created by gitClone).
+   */
+  const gitPush = useCallback(async (): Promise<{ ref: string }> => {
+    if (!webcontainer || !fs || !ready) {
+      throw new Error('Webcontainer not initialized. Please try again later.');
+    }
+
+    const ref = await gitCurrentBranch();
+    const token = Cookies.get('githubToken');
+
+    const onAuth = () => {
+      if (!token) {
+        toast.error('Not authenticated with GitHub. Connect GitHub first.');
+        return { cancel: true as const };
+      }
+      return { username: token, password: 'x-oauth-basic' };
+    };
+
+    try {
+      await git.push({
+        fs,
+        http,
+        dir: webcontainer.workdir,
+        remote: 'origin',
+        ref,
+        onAuth,
+        corsProxy: '/api/workbench/git-proxy',
+      });
+
+      return { ref };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Push failed: ${msg}`);
+    }
+  }, [webcontainer, fs, ready, gitCurrentBranch]);
+
+  /**
+   * One-click snapshot: stage + commit + push.
+   */
+  const gitSnapshot = useCallback(
+    async (message: string): Promise<{ sha: string; ref: string }> => {
+      const cleanMessage = (message || '').trim() || 'snapshot via MAYA';
+      const sha = await gitCommit(cleanMessage);
+      const { ref } = await gitPush();
+      return { sha, ref };
+    },
+    [gitCommit, gitPush],
+  );
+
+  return { ready, gitClone, gitCommit, gitPush, gitSnapshot, gitEnsureRepo };
 }
 
 const getFs = (
