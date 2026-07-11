@@ -1,4 +1,5 @@
 import { memo, Fragment, useState, useEffect, useRef } from 'react';
+import { useStore } from '@nanostores/react';
 import { Markdown } from './Markdown';
 import type { JSONValue } from 'ai';
 import { workbenchStore } from '@/lib/workbench/stores/workbench';
@@ -120,6 +121,13 @@ export const AssistantMessage = memo(
       if (!showBuildError) return;
       return workbenchStore.buildErrorCard.subscribe((v) => setBuildError(v as any));
     }, [showBuildError]);
+
+    // S3: silent autonomous build — while armed, suppress ALL visible error
+    // surfacings (BuildErrorCard + empty-response alert). Errors still ride the
+    // hidden pipelineInstructions channel so the fix loop fires; only the visible
+    // noise dies. Matches the Q4 contract: single progress card is the lone live
+    // surface during the build.
+    const silentBuildActive = useStore(workbenchStore.silentBuildActive);
 
     return (
       <div className="group/message overflow-hidden w-full flex items-start gap-3">
@@ -243,13 +251,13 @@ export const AssistantMessage = memo(
             {/* ─── Phase B: in-chat styled build-error card (replaces leaked
                 synthetic-user error dump). Live as a real assistant surface
                 in the AIDA flow between Desire (tool cards) and Action. */}
-            {!isStreaming && buildError ? <BuildErrorCard {...buildError} /> : null}
+            {!isStreaming && buildError && !silentBuildActive ? <BuildErrorCard {...buildError} /> : null}
 
             {/* Empty response warning — double-bezel alert, bilingual.
                 Fires when the model emitted no visible text answer, whether it
                 produced only reasoning (thought-but-no-answer) or nothing at all.
                 Tool-only turns don't trigger it — those are real build steps. */}
-            {!isStreaming && !hasContent && !(toolInvocations && toolInvocations.length > 0) && messageId && (
+            {!isStreaming && !hasContent && !(toolInvocations && toolInvocations.length > 0) && messageId && !silentBuildActive && (
               <div
                 className="flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] ring-1 ring-red-400/15"
                 style={{

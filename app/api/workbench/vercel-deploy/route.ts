@@ -4,6 +4,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+// Bug 2026-07-11: the polling loop (60x2s = up to 2min) exceeded the Next.js
+// Serverless default `maxDuration` (Hobby: 10s, Pro: 60s) and was terminated
+// mid-deploy. Set explicitly to 300s so the route survives until polling
+// completes or the upstream cap kicks in.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -43,6 +48,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Bug 2026-07-11: explicit size guard so callers hit a clear message
+    // instead of NaN 4MB Next.js default limit with a generic 413.
+    const contentLength = Number(request.headers.get('content-length') ?? 0);
+    if (contentLength > 3_500_000) {
+      return NextResponse.json(
+        { error: `Deployment too large (${(contentLength / 1_000_000).toFixed(1)}MB). Reduce source files or chunk the upload.` },
+        { status: 413 },
+      );
+    }
     const { projectId, files, sourceFiles, token: clientToken, chatId, framework } = (await request.json()) as any;
 
     // Use client token if provided, otherwise fall back to global DEPLOY_TOKEN

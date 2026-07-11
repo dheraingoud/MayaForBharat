@@ -138,15 +138,21 @@ export function useGitHubConnection(): UseGitHubConnectionReturn {
         tokenType,
       };
 
-      // Set cookies for API requests
-      Cookies.set('githubToken', token);
-      Cookies.set('githubUsername', userData.login);
+      // Set cookies for API requests. SECURITY (2026-07-11): previously set
+      // with zero flags — XSS-readable. We can't add HttpOnly from client JS
+      // (browser restriction), but sameSite:'strict' blocks CSRF and `secure`
+      // blocks non-HTTPS exfil. The auth cookies must travel only to api
+      // endpoints; sameOrigin auth UI requires sameSite=lax for redirects.
+      const COOKIE_OPTS = { secure: true, sameSite: 'lax' as const, path: '/', expires: 30 };
+      Cookies.set('githubToken', token, COOKIE_OPTS);
+      Cookies.set('githubUsername', userData.login, COOKIE_OPTS);
       Cookies.set(
         'git:github.com',
         JSON.stringify({
           username: token,
           password: 'x-oauth-basic',
         }),
+        COOKIE_OPTS,
       );
 
       // Update the store

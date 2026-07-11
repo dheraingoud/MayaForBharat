@@ -188,6 +188,40 @@ export async function POST(req: NextRequest) {
       ? body.preallocatedAppId.trim()
       : undefined;
 
+  // DURABILITY: apps row BEFORE LLM plan — survives fetch abort (Task #28).
+  // handleApprove does fire-and-forget + navigate; keepalive lets the POST
+  // survive navigation, but a tab/process tear-down mid-LLM would erase the
+  // build entirely if apps.create ran AFTER the ~90s plan. Create the row NOW
+  // (heuristic name from the prompt, no specJson yet) so /workbench/[id] has
+  // something to subscribe to the instant the redirect lands, then repatch
+  // specJson idempotently once the LLM plan resolves lower down.
+  const appId = preallocatedAppId ?? randomUUID();
+  const convexUrl =
+    process.env.NEXT_PUBLIC_CONVEX_URL ||
+    process.env.CONVEX_URL ||
+    'https://example.check.convex.cloud';
+  const convex = new ConvexHttpClient(convexUrl);
+  const eagerName = sanitizeName(extractAppNameFromPrompt(prompt) ?? prompt, 'New App');
+  const eagerDesc = extractDescription(prompt);
+  try {
+    await convex.mutation(api.apps.create, {
+      traderId: 'anonymous',
+      appId,
+      name: eagerName,
+      nameHindi: eagerName,
+      descriptionEn: eagerDesc,
+      category: 'other',
+      status: 'building',
+      messages: [],
+    });
+  } catch (e: any) {
+    logger.error('[plan] apps.create (eager) failed:', e?.message ?? e);
+    return NextResponse.json(
+      { error: `could not create app shell: ${e?.message ?? 'unknown'}`, appId },
+      { status: 500 },
+    );
+  }
+
   // Resolve model + provider from env (mirrors /api/plan).
   const miniModelEnv = process.env.MAYA_MINI || 'stepfun-ai/step-3.7-flash';
   const bareModel = miniModelEnv.replace(/^nvidia-nim\//i, '');
@@ -370,16 +404,12 @@ export async function POST(req: NextRequest) {
   // Tell the LLM (next time) to use the user-supplied name if any. Kept simple.
   void finalDescription;
 
-  // Mint a stable appId and create the apps row so:
-  //   a) /workbench/[appId] has something to subscribe to
-  //   b) the worker can write to apps.fileTree on completion
-  const appId = preallocatedAppId ?? randomUUID();
-  const convexUrl =
-    process.env.NEXT_PUBLIC_CONVEX_URL ||
-    process.env.CONVEX_URL ||
-    'https://example.check.convex.cloud';
-  const convex = new ConvexHttpClient(convexUrl);
-
+  // DURABILITY: idempotent repatch of specJson + final name.
+  // The eager apps.create above already wrote a building row with a heuristic
+  // name; apps.create is Upsert-by-appId (convex/apps.ts), so this call PATCHes
+  // specJson + the LLM-derived name. Non-fatal: the row already exists and
+  // BuilderPageWithJob Effect#1 owns generation spawn from the prompt, so a
+  // repatch failure must not break the build — the heuristic row is enough.
   try {
     await convex.mutation(api.apps.create, {
       traderId: 'anonymous',
@@ -393,33 +423,7 @@ export async function POST(req: NextRequest) {
       messages: [],
     });
   } catch (e: any) {
-    logger.error('[plan] apps.create failed:', e?.message ?? e);
-    return NextResponse.json(
-      {
-        error: `could not create app shell: ${e?.message ?? 'unknown'}`,
-        appId, // still return so the client can fall back
-      },
-      { status: 500 },
-    );
-  }
-
-  // Auto-spawn the detached generation job so the build starts immediately on
-  // plan-approve (Phase 1.2 fix for the "come-back stuck Building" gap). Without
-  // this, plan-first apps get an `apps` row with `specJson` but no `generateJobs`
-  // row → BuilderPageWithJob sees no job → renders Builder with synthetic priming
-  // → user stuck on "Building in progress…" forever. Spawned server-side so the
-  // job exists by the time the client redirects to /workbench/[appId].
-  // Errors here are logged but non-fatal — the plan + appId are already saved,
-  // and the user can retry the build from GenerateJobCard.
-  try {
-    await convex.mutation(api.generateJobs.createJob, {
-      appId,
-      prompt,
-      model: bareModel,
-      provider,
-    });
-  } catch (e: any) {
-    logger.error('[plan] generateJobs.createJob failed:', e?.message ?? e);
+    logger.error('[plan] apps.create (repatch) failed:', e?.message ?? e);
   }
 
   return NextResponse.json({ plan, appId, model: bareModel, provider, fallback: usedFallback });

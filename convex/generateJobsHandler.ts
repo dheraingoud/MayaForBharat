@@ -17,6 +17,7 @@
 
 import { internal } from "./_generated/api";
 import { streamText } from "../lib/workbench/llm/stream-text";
+import type { UIMessage } from "ai";
 import { extractBoltFiles } from "../lib/workbench/llm/extract-bolt-files";
 
 // @ts-nocheck — Convex internalAction ctx is loosely typed; matches the convention
@@ -27,12 +28,27 @@ const SAVE_EVERY_MS = 3_000;
 const SAVE_EVERY_CHARS = 4_000;
 // Chunk-timeout watchdog: abort an attempt whose SSE stream has gone silent
 // for STALL_TIMEOUT_MS, then retry on a fresh AbortController. Up to
-// MAX_STALL_RETRIES+1 attempts → worst-case SILENCE 3 × ~35s ≈ 105s before we
-// give up, which stays under the 120s stale sweeper so a pure-stall row is
-// surfaced as "stalled mid-stream" by us, not "stale" by the sweeper. Recovers
-// stepfun-3.7-flash mid-stream stalls (see memory/maya-nim-stepfun-stall).
+// STALL_TIMEOUT_MS + STALL_TIMEOUT_MS/6 poll → ~35s per attempt. 2 attempts
+// (MAX_STALL_RETRIES=1 + 1 initial) = ~70s worst-case pure silence before
+// markError. Stays under 120s stale sweeper. Recovers stepfun+deepseek mid-stream
+// stalls (see memory/maya-nim-stepfun-stall).
 const STALL_TIMEOUT_MS = 30_000;
-const MAX_STALL_RETRIES = 2;
+const MAX_STALL_RETRIES = 1;
+// Reasoning-only ceiling: a reasoning model (deepseek-v4-flash) can TRICKLE
+// reasoning-delta chunks — alive enough to keep the STALL_TIMEOUT_MS watchdog
+// quiet, but never crossing into text-delta / file emission — and stall
+// indefinitely with zero files. Abort + retry on a fresh controller when no
+// file-progress chunk has landed for REASON_CEILING_MS (with zero files).
+// Retry budget 2 × (60s + 5s poll) ≈ 130s before markError; the 2-min stale
+// sweeper stays quiet because saveProgress still bumps lastProgressAt ~every
+// 3s per reasoning chunk. Reduced from 90s to 60s (2026-07-11) because 3×90s
+// + NIM startup overhead hit Convex's 600s action timeout. See memory/maya-nim-stepfun-stall.
+const REASON_CEILING_MS = 60_000;
+// Hard wall-clock cap (2026-07-11): if the handler hasn't marked a terminal
+// state within HARD_TIMEOUT_MS, force-error. Guards against Convex's 600s
+// action timeout when NIM startup + stall retries compound. Marked 300s to
+// leave 300s headroom below Convex's 600s limit.
+const HARD_TIMEOUT_MS = 300_000;
 
 class Cancelled extends Error {
   __cancelled = true as const;
@@ -109,12 +125,18 @@ export async function generateJobsHandler(
   // userCancelled: set ONLY by checkCancel before aborting; read in the catch.
   // lastChunkAt: bumped on EVERY chunk type (text-delta AND reasoning) so a
   //   long reasoning phase (deepseek) isn't mistaken for a stall.
+  // lastFileProgressAt: bumped ONLY on text-delta (file-bearing) chunks. A
+  //   reasoning model trickle emits reasoning-delta but no text-delta for
+  //   minutes — lastChunkAt stays fresh (no STALL_TIMEOUT trip) while
+  //   lastFileProgressAt goes stale, tripping REASON_CEILING_MS instead.
   // stallInterval: per-attempt stall-watch timer; cleared in the outer finally
   //   and re-armed in the while-opener so attempt N's dead interval never
   //   fires during attempt N+1.
   let stallAborted = false;
   let userCancelled = false;
+  let hardTimedOut = false;
   let lastChunkAt = Date.now();
+  let lastFileProgressAt = Date.now();
   let stallInterval: ReturnType<typeof setInterval> | undefined;
   let attempts = 0;
 
@@ -135,11 +157,16 @@ export async function generateJobsHandler(
     }
   };
 
-  const saveProgressNow = async (note: string) => {
+  // Phase B (Bug 2026-07-11): pass parsedFiles → saveProgress so partial
+  // files patch generateJobs.filesJson mid-build. Reopen-mid-build subscriber
+  // then hydrates server progress so far. `parsedFiles` is fresh-computed in
+  // onChunk (extractBoltFiles, closing-tag-gated) just above each call.
+  const saveProgressNow = async (note: string, files?: { path: string; content: string }[] | null) => {
     await ctx.runMutation(internal.generateJobs.saveProgress, {
       jobId,
       partialText,
       progressNote: note,
+      files: files ?? undefined,
     });
   };
 
@@ -157,12 +184,22 @@ export async function generateJobsHandler(
   // is surfaced as "stalled mid-stream" by us, not "stale" by the sweeper. Total
   // wall-clock can exceed 120s when an attempt emits for a while before going
   // silent — in that degenerate case the sweeper falls back to a (correct) error.
+  // Hard wall-clock cap: if NIM startup + stall retries compound past
+  // HARD_TIMEOUT_MS, force-mark error + throw to exit. Guards Convex 600s
+  // action timeout (see 2026-07-11 deepseek 600s timeout incident).
+  let hardTimeout: ReturnType<typeof setTimeout> | undefined;
+  hardTimeout = setTimeout(() => {
+    hardTimedOut = true;
+    attemptAbortController.abort();
+  }, HARD_TIMEOUT_MS);
+
   while (attempts < MAX_STALL_RETRIES + 1) {
   if (stallInterval) { clearInterval(stallInterval); stallInterval = undefined; }
   attemptAbortController = new AbortController();
   stallAborted = false;
   userCancelled = false;
   lastChunkAt = Date.now();
+  lastFileProgressAt = Date.now();
   partialText = '';
   lastSaveLen = 0;
   lastSaveAt = Date.now();
@@ -172,7 +209,14 @@ export async function generateJobsHandler(
   stallInterval = setInterval(() => {
     // `>=` + 5s poll ⇒ first poll at/after the 30s threshold fires within ~5s,
     // so detection latency ≤ 5s (not the 15s a /2 poll would give).
-    if (Date.now() - lastChunkAt >= STALL_TIMEOUT_MS) {
+    const staleAll = Date.now() - lastChunkAt >= STALL_TIMEOUT_MS;
+    // Reasoning-only stall (deepseek): chunks still trickling (lastChunkAt
+    // fresh) BUT no text-delta / file progress for REASON_CEILING_MS with
+    // zero files → keepalive-stall, abort + retry.
+    const reasonStale =
+      parsedFiles.length === 0 &&
+      Date.now() - lastFileProgressAt >= REASON_CEILING_MS;
+    if (staleAll || reasonStale) {
       stallAborted = true;
       attemptAbortController.abort();
     }
@@ -185,11 +229,13 @@ export async function generateJobsHandler(
     }
     const streamResult: any = await streamText({
       messages: [
+        // AI SDK v6 UIMessage no longer carries a top-level `content` — text
+        // lives only in `parts`. We omit `id` (handed downstream) so a future
+        // schema drift surfaces at compile time, not as a silent stream crash.
         {
           role: 'user',
           parts: [{ type: 'text' as const, text: job.prompt }],
-          content: job.prompt,
-        } as any,
+        } as Omit<UIMessage<unknown, any, any>, 'id'>,
       ],
       env: process.env as Record<string, string>,
       apiKeys,
@@ -212,6 +258,10 @@ export async function generateJobsHandler(
             typeof chunk.text === 'string'
           ) {
             partialText += chunk.text;
+            // File-progress heartbeat: text-delta feeds extractBoltFiles, so a
+            // text-delta chunk counts as real progress vs the reasoning trickle
+            // that doesn't. Bumps lastFileProgressAt → REASON_CEILING_MS watchdog.
+            lastFileProgressAt = Date.now();
           }
           const now = Date.now();
           // Bump on EVERY chunk type (text-delta AND reasoning) — a long
@@ -224,6 +274,7 @@ export async function generateJobsHandler(
             parsedFiles = extractBoltFiles(partialText);
             await saveProgressNow(
               `Streaming — ${parsedFiles.length} file${parsedFiles.length === 1 ? '' : 's'} detected`,
+              parsedFiles,
             );
             lastSaveAt = now;
             lastSaveLen = partialText.length;
@@ -236,11 +287,17 @@ export async function generateJobsHandler(
         onError: async (event: { error?: unknown }) => {
           // DIAGNOSTIC: capture the actual error so we know why the stream died.
           // Persist into the row so it's inspectable from `npx convex data generateJobs`.
+          // Narrow unknown → Error.message / String fallback rather than `as any`
+          // dot-chain (which silently produced `undefined` for plain objects).
           console.error('[generateJobsHandler] streamText onError:', event?.error);
+          const errMsg =
+            event?.error instanceof Error
+              ? event.error.message
+              : String(event?.error ?? '');
           await ctx.runMutation(internal.generateJobs.saveProgress, {
             jobId,
             partialText: partialText || '',
-            progressNote: `stream error: ${String((event?.error as any)?.message ?? event?.error ?? '').slice(0, 200)}`,
+            progressNote: `stream error: ${errMsg.slice(0, 200)}`,
           });
         },
         onFinish: async (event: any) => {
@@ -326,6 +383,16 @@ export async function generateJobsHandler(
     // onFinish already marked a terminal state (live / no-files error) — a
     // late stall/cancel abort after that must NOT clobber it.
     if (didMark) return { ok: true, files: parsedFiles.length };
+    // Hard wall-clock cap fired (Convex 600s guard) → error immediately,
+    // no more retries. Must precede stallAborted — hardTimeout also calls
+    // abort() which could race with the stall-watch.
+    if (hardTimedOut) {
+      await ctx.runMutation(internal.generateJobs.markError, {
+        jobId,
+        error: `hard timeout (${HARD_TIMEOUT_MS / 1000}s wall-clock) — NIM stream did not finish`,
+      });
+      return { ok: false };
+    }
     // Stall-watch fired (SSE silent > STALL_TIMEOUT_MS) → retry on a fresh
     // controller; surface exhaustion so the row shows a real error, not a
     // 2-min "stale" from the sweeper.
@@ -362,12 +429,13 @@ export async function generateJobsHandler(
     if (stallInterval) { clearInterval(stallInterval); stallInterval = undefined; }
   }
   } // end stall-retry while
-  // Defensive — every stall exhaustion returns inside the catch above, so
-  // reaching past the while is a logical impossibility; the return keeps the
-  // function's Promise return type satisfied.
+  if (hardTimeout) clearTimeout(hardTimeout);
+  // Defensive — every stall/hard-timeout exhaustion returns inside the catch
+  // above, so reaching past the while is a logical impossibility; the return
+  // keeps the function's Promise return type satisfied.
   await ctx.runMutation(internal.generateJobs.markError, {
     jobId,
-    error: `stalled mid-stream (no chunk for ${STALL_TIMEOUT_MS / 1000}s after ${MAX_STALL_RETRIES + 1} attempts)`,
+    error: `stalled or timed out (no chunk for ${STALL_TIMEOUT_MS / 1000}s after ${MAX_STALL_RETRIES + 1} attempts)`,
   });
   return { ok: false };
 }
@@ -411,11 +479,16 @@ export const __testing = { TWO_MIN_MS };
 
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 
 export const generateRunAction = internalAction({
   args: { jobId: v.id("generateJobs") },
   handler: async (ctx, args) => {
-    return await generateJobsHandler(ctx, { jobId: args.jobId as any });
+    // args.jobId is already typed as Id<"generateJobs"> via `v.id` validation;
+    // the explicit cast below preserves that narrow at the call boundary so
+    // schema drift surfaces at compile time, not at runtime as a silent
+    // `null` lookup.
+    return await generateJobsHandler(ctx, { jobId: args.jobId as Id<"generateJobs"> });
   },
 });
 

@@ -74,6 +74,16 @@ export class ActionRunner {
   onDeployAlert?: (alert: DeployAlert) => void;
   buildOutput?: { path: string; exitCode: number; output: string };
 
+  /**
+   * Shell command timeout in milliseconds. Any shell command (e.g. npm install)
+   * that does not complete within this window will be killed via Ctrl+C and
+   * surfaced as a failed action with a toast.
+   *
+   * Override at runtime: ActionRunner.SHELL_TIMEOUT_MS = 600_000;
+   * Set to 0 to disable timeout entirely.
+   */
+  static SHELL_TIMEOUT_MS = 300_000;
+
   // Auto-fix configuration
   #autoFixAttempts: Map<string, number> = new Map();
   #MAX_AUTO_FIX_ATTEMPTS = 3; // Stop early — a fatal rebuild cascade fires if the LLM fix doesn't land
@@ -225,7 +235,7 @@ export class ActionRunner {
     try {
       switch (action.type) {
         case 'shell': {
-          await this.#runShellAction(action);
+          await this.#runShellAction(actionId, action);
           break;
         }
         case 'file': {
@@ -367,7 +377,7 @@ export class ActionRunner {
     }
   }
 
-  async #runShellAction(action: ActionState) {
+  async #runShellAction(actionId: string, action: ActionState) {
     if (action.type !== 'shell') {
       unreachable('Expected shell action');
     }
@@ -378,6 +388,9 @@ export class ActionRunner {
     if (!shell || !shell.terminal || !shell.process) {
       unreachable('Shell terminal not found');
     }
+    // Capture typed locals so TS narrows past the unreachable() throw.
+    const shellTerminal = shell.terminal;
+    const shellProcess = shell.process;
 
     // Pre-validate command for common issues
     const validationResult = await this.#validateShellCommand(action.content);
@@ -389,15 +402,72 @@ export class ActionRunner {
       commandToRun = validationResult.modifiedCommand;
     }
 
-    const resp = await shell.executeCommand(this.runnerId.get(), commandToRun, () => {
+    const timeoutMs = ActionRunner.SHELL_TIMEOUT_MS;
+
+    const executePromise = shell.executeCommand(this.runnerId.get(), commandToRun, () => {
       logger.debug(`[${action.type}]:Aborting Action\n\n`, action);
       action.abort();
     });
-    logger.debug(`${action.type} Shell Response: [exit code:${resp?.exitCode}]`);
 
-    if (resp?.exitCode != 0) {
-      const enhancedError = this.#createEnhancedShellError(action.content, resp?.exitCode, resp?.output);
-      throw new ActionCommandError(enhancedError.title, enhancedError.details);
+    // ── Timeout guard ──────────────────────────────────────────────
+    // Shell commands (npm install, npx, etc.) can hang on registry
+    // stalls, network blips, or mismatched deps. If they never finish,
+    // the verify cycle freezes. Race against a configurable deadline
+    // and kill via Ctrl+C on timeout.
+    if (timeoutMs > 0) {
+      const timedOutSymbol = Symbol('shell-timeout');
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      const raceResult = await Promise.race([
+        executePromise.then((resp) => ({ value: resp, timedOut: false as const })),
+        new Promise<{ value: typeof timedOutSymbol; timedOut: true }>((resolve) => {
+          timeoutId = setTimeout(() => resolve({ value: timedOutSymbol, timedOut: true }), timeoutMs);
+        }),
+      ]);
+
+      clearTimeout(timeoutId);
+
+      // ── Timeout path ──────────────────────────────────────────────
+      if (raceResult.timedOut) {
+        shellTerminal.input('\x03');
+        logger.error(`[ShellTimeout] Command timed out after ${timeoutMs / 1000}s: ${commandToRun}`);
+
+        this.#updateAction(actionId, {
+          status: 'failed',
+          error: `Command timed out after ${timeoutMs / 1000}s`,
+        });
+
+        // Await the killed command to settle so BoltShell internal
+        // state (executionState, stream readers) doesn't leak.
+        await executePromise.catch(() => undefined);
+
+        this.onAlert?.({
+          type: 'error',
+          title: 'Command Timed Out',
+          description: `"${commandToRun.slice(0, 80)}" hung for ${timeoutMs / 1000}s and was terminated`,
+          content: `The following command did not complete within ${timeoutMs / 1000}s:\n\n${commandToRun}`,
+        });
+
+        return;
+      }
+
+      // ── Normal path: command completed within budget ──────────────
+      const resp = raceResult.value;
+      logger.debug(`${action.type} Shell Response: [exit code:${resp?.exitCode}]`);
+
+      if (resp?.exitCode != 0) {
+        const enhancedError = this.#createEnhancedShellError(action.content, resp?.exitCode, resp?.output);
+        throw new ActionCommandError(enhancedError.title, enhancedError.details);
+      }
+    } else {
+      // Timeout disabled (SHELL_TIMEOUT_MS = 0) — original behaviour
+      const resp = await executePromise;
+      logger.debug(`${action.type} Shell Response: [exit code:${resp?.exitCode}]`);
+
+      if (resp?.exitCode != 0) {
+        const enhancedError = this.#createEnhancedShellError(action.content, resp?.exitCode, resp?.output);
+        throw new ActionCommandError(enhancedError.title, enhancedError.details);
+      }
     }
   }
 
@@ -416,6 +486,9 @@ export class ActionRunner {
     if (!shell || !shell.terminal || !shell.process) {
       unreachable('Shell terminal not found');
     }
+    // Capture typed locals so TS narrows past the unreachable() throw.
+    const shellTerminal = shell.terminal;
+    const shellProcess = shell.process;
 
     const resp = await shell.executeCommand(this.runnerId.get(), action.content, () => {
       logger.debug(`[${action.type}]:Aborting Action\n\n`, action);
@@ -683,6 +756,12 @@ export class ActionRunner {
 
     const deployStatus = stage === 'building' ? 'pending' : status;
 
+    // ActionStatus includes 'aborted' but DeployAlert.buildStatus/deployStatus
+    // only accept 'pending' | 'running' | 'complete' | 'failed'. Clamp first so
+    // strict-switch consumers don't silently fall through on 'aborted'.
+    const clampToDeploy = (s: typeof status): 'pending' | 'running' | 'complete' | 'failed' =>
+      s === 'aborted' ? 'failed' : s;
+
     this.onDeployAlert({
       type: alertType,
       title,
@@ -690,8 +769,8 @@ export class ActionRunner {
       content: details?.error || '',
       url: details?.url,
       stage,
-      buildStatus: buildStatus as any,
-      deployStatus: deployStatus as any,
+      buildStatus: clampToDeploy(buildStatus),
+      deployStatus: clampToDeploy(deployStatus),
       source: details?.source || 'netlify',
     });
   }

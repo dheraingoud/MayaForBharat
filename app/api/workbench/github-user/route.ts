@@ -202,10 +202,16 @@ async function githubUserAction({ request }: { request: Request }) {
     }
 
     if (action === 'get_token') {
-      // Return the GitHub token for git authentication
-      return NextResponse.json({
-        token: githubToken,
-      });
+      // SECURITY FIX (2026-07-11): previously returned the full GitHub PAT in
+      // the response body, which any same-origin JS (XSS or malicious client
+      // code) could exfiltrate by calling this endpoint. The token MUST stay
+      // server-side — store it as an httpOnly cookie via /api/auth if/when
+      // any client flow actually needs the auth header. Until then, refuse
+      // the request outright.
+      return NextResponse.json(
+        { error: 'get_token action removed for security — token is server-only' },
+        { status: 410 },
+      );
     }
 
     if (action === 'search_repos') {

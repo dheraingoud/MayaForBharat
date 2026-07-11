@@ -129,7 +129,7 @@ export const MODELS = {
 
   /** Proposer — reasons about what improvements to make */
   PROPOSER: {
-    id: 'minimaxai/minimax-m3',
+    id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 4096,
     thinking: { thinking_mode: 'adaptive' },
     temperature: 1,
@@ -139,7 +139,7 @@ export const MODELS = {
 
   /** Visual observer — multimodal screenshot analysis */
   OBSERVER_VISUAL: {
-    id: 'minimaxai/minimax-m3',
+    id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 8192,
     thinking: { thinking_mode: 'adaptive' },
     temperature: 0.8,
@@ -149,7 +149,7 @@ export const MODELS = {
 
   /** Memory consolidation — autoDream cross-cycle pattern analysis */
   AUTO_DREAM: {
-    id: 'minimaxai/minimax-m3',
+    id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 8192,
     thinking: { thinking_mode: 'enabled' },
     temperature: 0.7,
@@ -159,7 +159,7 @@ export const MODELS = {
 
   /** Multimodal QA — UI testing and verification */
   TESTER: {
-    id: 'minimaxai/minimax-m3',
+    id: 'stepfun-ai/step-3.7-flash',
     maxTokens: 8192,
     thinking: { thinking_mode: 'adaptive' },
     temperature: 0.8,
@@ -182,7 +182,7 @@ export const MODELS = {
 
 /** Fallback model — MiniMax M3 with forced reasoning */
 export const FALLBACK_MODEL: ModelConfig = {
-  id: 'minimaxai/minimax-m3',
+  id: 'stepfun-ai/step-3.7-flash',
   maxTokens: 8192,
   thinking: { thinking_mode: 'enabled' },
   temperature: 0.8,

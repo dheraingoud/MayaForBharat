@@ -167,15 +167,24 @@ interface NimModelEntry {
  */
 const NIM_MODEL_CATALOG: Record<string, NimModelEntry> = {
   // ── DeepSeek ──
-  // maxCompletionTokens bumped 16384 → 28672: deepseek-v4-flash (MAYA_FAST
-  // default) emits reasoning_content BEFORE the answer (hybrid reasoning mode),
-  // mirroring the stepfun step-3.7-flash truncation pattern. With the prior
-  // 16384 cap + reasoning budget subtraction (~floor(max/3) ≈ 5461), only
-  // ~10.9k tokens were left for the bolt XML answer — a multi-file build needs
-  // 12-15k → truncated mid-XML, no <boltArtifact> ever closed, zero file cards.
-  // 28672 with the 1M context window leaves ample prompt room and gives the
-  // answer ~21k after reasoning. Same class of fix as the stepfun bump at L181.
-  'deepseek-ai/deepseek-v4-flash':       { maxTokenAllowed: 1048576, maxCompletionTokens: 28672 },
+  // maxCompletionTokens bumped 16384 → 28672 → 40960: deepseek-v4-flash
+  // (MAYA_FAST default) emits reasoning_content BEFORE the answer (hybrid
+  // reasoning mode), mirroring the stepfun step-3.7-flash truncation pattern.
+  // With the prior 16384 cap + reasoning budget subtraction (~floor(max/3)
+  // ≈ 5461), only ~10.9k tokens were left for the bolt XML answer — a
+  // multi-file build needs 12-15k → truncated mid-XML, no <boltArtifact>
+  // ever closed, zero file cards. 28672 gave the answer ~21k after reasoning.
+  // 2026-07-10: 28672 still truncated multi-file builds live (deca09a5: ~17min
+  // reasoning across 4 messages, reasoning overflowed → ate answer tokens →
+  // code truncated mid-file, package.json incomplete → npm install failed →
+  // auto-fix loop exhausted → Error). reasoning_effort:'high' on NIM is an
+  // INTERNAL model budget (~7-10k observed) subtracted from
+  // max_completion_tokens; 40960 leaves ~31k answer room — enough for a 5-6
+  // file bolt XML. 1M context window → ample prompt room. needs `bunx convex
+  // dev` push: this catalog value flows through stream-text.ts L34/L235 →
+  // body.max_completion_tokens → NIM, and generateJobsHandler imports
+  // stream-text (server-side Convex action). Keep /4 ratio at L455.
+  'deepseek-ai/deepseek-v4-flash':       { maxTokenAllowed: 1048576, maxCompletionTokens: 40960 },
   'deepseek-ai/deepseek-r1':             { maxTokenAllowed: 131072, maxCompletionTokens: 8192,  label: 'DeepSeek R1 (Reasoning)' },
   'deepseek-ai/deepseek-v3':             { maxTokenAllowed: 131072, maxCompletionTokens: 8192 },
 
@@ -193,6 +202,17 @@ const NIM_MODEL_CATALOG: Record<string, NimModelEntry> = {
   // 32k completion leaves ample room for the prompt. reasoning_effort:'high'
   // is a SEPARATE budget on NIM (not subtracted from max_completion_tokens),
   // so the full 32k goes to the bolt XML answer — enough for a 5-file app.
+  // 2026-07-10 LIVE FINDING (maya_1783663208366, 3-file Todo, Maya Max tier):
+  // minimax-m3 high reasoning-TRICKLE stalls at 573s wall / 0 files. keepalive
+  // reasoning-delta chunks flow (keep lastChunkAt + lastProgressAt fresh → the
+  // deployed 30s STALL_TIMEOUT + 2min sweeper BOTH stay quiet) but 0 text-delta
+  // / 0 boltArtifact ever lands → infinite "Building". SAME NIM free-tier
+  // failure class as deepseek-v4-flash (deca09a5), NOT a token-cap issue (the
+  // separate reasoning budget means the answer WOULDN'T truncate — minimax
+  // just never gets there). Defended ONLY by the REASON_CEILING_MS watchdog in
+  // generateJobsHandler.ts (trips on 0 files + 90s no text-delta → abort +
+  // retry up to 3× → markError). Watchdog is server-side → needs `bunx convex
+  // dev` push to take effect. See memory maya-nim-stepfun-stall.
   'minimaxai/minimax-m3':                { maxTokenAllowed: 1048576, maxCompletionTokens: 32768 },
 
   // ── Meta Llama ──
@@ -243,7 +263,7 @@ const TIER_DEFAULTS: Record<MayaTier, string> = {
   mini:     'stepfun-ai/step-3.7-flash',
   fast:     'deepseek-ai/deepseek-v4-flash',
   max:      'minimaxai/minimax-m3',
-  verifier: 'minimaxai/minimax-m3',
+  verifier: 'stepfun-ai/step-3.7-flash',
 };
 
 const TIER_ENV_KEYS: Record<MayaTier, string> = {

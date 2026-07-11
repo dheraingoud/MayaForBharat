@@ -75,6 +75,26 @@ export class WorkbenchStore {
     attempt: number;
     maxAttempts: number;
   } | undefined> = import.meta.hot?.data.buildErrorCard ?? atom(undefined);
+  // Silent autonomous build (see docs/superpowers/specs/2026-07-10-silent-autonomous-build-design.md).
+  // Armed on the first build-mode send in BuilderPage. While true: composer is
+  // locked, verify/auto-fix directives ride the hidden pipelineInstructions
+  // channel (no visible bubbles), BuildErrorCard + toasts + red status dot stay
+  // hidden, and the single GenerateJobCard progress surface is the only live UI.
+  // Cleared on exit-gate pass (runtime-clean AND vision-passed) or give-up (15 cycles).
+  silentBuildActive: WritableAtom<boolean> =
+    import.meta.hot?.data.silentBuildActive ?? atom<boolean>(false);
+  // 1..15, incremented per verify/auto-fix round. Drives the "Cycle N/15" pill
+  // and the exhausted flip. Source of truth is BuilderPage (via onVerifyCycle),
+  // not the verify hook's internal cycleRef (which resets per stream).
+  silentCycle: WritableAtom<number> = import.meta.hot?.data.silentCycle ?? atom<number>(1);
+  // Drives the GenerateJobCard sub-status while silent.
+  silentPhase: WritableAtom<'building' | 'verifying' | 'vision-judging' | 'exhausted'> =
+    import.meta.hot?.data.silentPhase ??
+    atom<'building' | 'verifying' | 'vision-judging' | 'exhausted'>('building');
+  // Set when the exit gate holds: runtime-clean AND vision-passed both true.
+  // BuilderPage reads this to hand off to the normal live state + unlock composer.
+  silentExitReady: WritableAtom<boolean> =
+    import.meta.hot?.data.silentExitReady ?? atom<boolean>(false);
   modifiedFiles = new Set<string>();
   artifactIdList: string[] = [];
   #globalExecutionQueue = Promise.resolve();
@@ -88,6 +108,10 @@ export class WorkbenchStore {
       import.meta.hot.data.supabaseAlert = this.supabaseAlert;
       import.meta.hot.data.deployAlert = this.deployAlert;
       import.meta.hot.data.buildErrorCard = this.buildErrorCard;
+      import.meta.hot.data.silentBuildActive = this.silentBuildActive;
+      import.meta.hot.data.silentCycle = this.silentCycle;
+      import.meta.hot.data.silentPhase = this.silentPhase;
+      import.meta.hot.data.silentExitReady = this.silentExitReady;
 
       // Ensure binary files are properly preserved across hot reloads
       const filesMap = this.files.get();

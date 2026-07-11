@@ -409,11 +409,14 @@ export default function LandingPage() {
     window.location.href = dest
 
     // Fire-and-forget the POST that creates the Convex shell + LLM plan.
-    // No await — this runs in the background of the navigation.
+    // keepalive: true lets this request complete across the navigation below —
+    // without it, window.location.href aborts the fetch, apps.create never runs,
+    // the apps row stays NULL, and a reload wipes all progress (durability bug).
     fetch('/api/apps-from-plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: submittedPromptStr, preallocatedAppId: appId }),
+      keepalive: true,
     }).catch((e) => {
       console.warn('[approve] background apps-from-plan failed', e)
     })

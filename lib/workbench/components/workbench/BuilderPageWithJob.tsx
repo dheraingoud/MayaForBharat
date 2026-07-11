@@ -91,6 +91,12 @@ export function BuilderPageWithJob({
   const cancelJob = useCancelGenerateJob();
   const submittedRef = useRef(false);
   const mountedFileSetRef = useRef<string | null>(null);
+  // Phase C (Bug 2026-07-11): flipped true when a reopen-mid-build hydrated
+  // partial `building` files into the store. Effect#2 reads it on the later
+  // `live` transition to force-overwrite — complete live files MUST replace
+  // the partial building set instead of being gated out by the
+  // survival-vs-visible store-non-empty bail at L210-213.
+  const reopenHydratedRef = useRef(false);
 
   // Reactive in-browser file map. The detached Convex job and the in-browser
   // chat stream (BuilderPage's action-runner) both generate the same app; when
@@ -209,7 +215,14 @@ export function BuilderPageWithJob({
     // empty (nanostore resets) → detached `live` hydrates here.
     const existingFiles = workbenchStore.files.get();
     if (Object.keys(existingFiles).length > 0) {
-      return;
+      // Phase C (Bug 2026-07-11): if the store was populated by a reopen-
+      // mid-build hydration of partial `building` files (reopenHydratedRef),
+      // the complete `live` files MUST replace them — fall through + overwrite
+      // instead of gating out. Otherwise the preview/tree would stay stuck
+      // on the partial set forever (reopen-hydration ran Effect#2.5, not this).
+      if (!reopenHydratedRef.current) return;
+      reopenHydratedRef.current = false;
+      // fall through — the tag guard below still dedupes same-size rewrites.
     }
 
     const tag = `${job._id ?? ''}:${job.files.length}`;
@@ -290,6 +303,105 @@ export function BuilderPageWithJob({
       }
     });
   }, [job.status, job._id, job.files, appId]);
+
+  // ── 2.5 Reopen-mid-build hydration (Bug 2026-07-11, decision 3): a tab
+  //      closed mid-build reopens while the detached Convex job is still
+  //      `building` and Phase B now patches filesJson every ~3s as files
+  //      stream. Hydrate that server progress so far into the WebContainer +
+  //      workbenchStore + boot the dev server ONCE, so the preview fills
+  //      progressively instead of sitting blank on a <Greeting>. Delta-only
+  //      via tag-guard: each new file batch writes only changed paths, no
+  //      re-install. The slim <SilentBuildStrip> (armed when this effect runs —
+  //      see Effect#3 extension below) shows "Building · cycle N/15" at the top
+  //      of the chat column, so the user sees live progress, never a
+  //      "Building your app" full card.
+  //      Survival-vs-visible: Effect#2's `live` gate stays authoritative for
+  //      the complete-files case; reopenHydratedRef lets Effect#2 overwrite on
+  //      the later `live` transition (covers the partial-set-not-final edge).
+  const hydratedBuildingTagRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (job.status !== 'building') return;
+    if (!job.files || job.files.length === 0) return;
+    if (inBrowserCount > 0) return; // active in-browser build owns the WebContainer
+    const tag = `${job._id ?? ''}:${job.files.length}`;
+    if (hydratedBuildingTagRef.current === tag) return;
+    hydratedBuildingTagRef.current = tag;
+    reopenHydratedRef.current = true; // signal Effect#2 to overwrite on `live`
+
+    (async () => {
+      const { written, failed } = await writeFilesToWebContainer(job.files!);
+      // Mirror into the workbenchFile store so Builders/Preview file tree
+      // mirrors the WC (merge over existing partial set so tree grows).
+      const existing = (workbenchStore.files.get() as Record<string, any>) ?? {};
+      const map: Record<string, any> = { ...existing };
+      for (const f of job.files ?? []) {
+        map[f.path] = { type: 'file', content: f.content, isBinary: false };
+      }
+      workbenchStore.files.set(map as any);
+
+      try {
+        if (!chatDescriptionAtom.get()) {
+          chatDescriptionAtom.set(`Generated app ${(appId ?? '').slice(0, 6)}`);
+        }
+      } catch {}
+
+      if (failed.length > 0) {
+        toast.warn(`Reopen hydrate · wrote ${written} (${failed.length} failed)`, { autoClose: 2500 });
+      }
+
+      // Boot the dev server ONCE for the reopen path (gated by previews empty
+      // + cross-component double-boot flag — mirror Effect#2's L252-290 boot).
+      // Delta batches re-fire this effect but skip install (previews.length>0).
+      const previews = workbenchStore.previews.get();
+      if (previews.length === 0 && !devServerBooting.get()) {
+        devServerBooting.set(true);
+        try {
+          const wc = await webcontainer;
+          const { detectProjectCommands } = await import('@/lib/workbench/utils/projectCommands');
+          const fileList = (job.files ?? []).map((f) => ({ path: f.path, content: f.content }));
+          const commands = await detectProjectCommands(fileList);
+          const installCmd = commands.setupCommand || 'npm install --no-audit --no-fund';
+          const startCmd = commands.startCommand || 'npm run dev';
+          const installProc = await wc.spawn('sh', ['-c', installCmd]);
+          const installExit = await installProc.exit;
+          if (installExit !== 0) {
+            console.warn('[BuilderPageWithJob][reopen] install exit', installExit, '— trying dev anyway');
+          }
+          await wc.spawn('sh', ['-c', startCmd]); // don't await — runs indefinitely
+        } catch (e) {
+          console.error('[BuilderPageWithJob][reopen] dev-server boot failed', e);
+          devServerBooting.set(false); // self-clear on failure (mirror Effect#2)
+        }
+      }
+    })();
+  }, [job.status, job._id, job.files, inBrowserCount, appId]);
+
+  // ── 3. Come-back re-arm (S4 / Q6 durability): reopening an app whose
+  //      apps.fileTree just hydrated (detached `live` wrote files into the
+  //      store via Effect#2) but hasn't reached silentExitReady re-enters the
+  //      silent loop toward a perfect preview instead of stopping at `live`.
+  //      We re-arm the silent atoms only — BuilderPage owns the verify hook
+  //      (usePreviewVerification) + the onVerifyCycle callback that flips
+  //      silentPhase/cycle/exit-ready; its atom→ref sync effect propagates
+  //      this arm into the refs that callback reads. Gates: `live` + files in
+  //      store + not already armed + not already exit-ready, so a fresh build
+  //      (armed at sendMessage, silentBuildActive already true) is never
+  //      double-armed here.
+  const reArmedRef = useRef(false);
+  useEffect(() => {
+    if (reArmedRef.current) return;
+    // Arm on live (canonical signal), OR on building with partial files
+    // (reopen-mid-build hydration — server progress present, keep strip
+    // so user sees build continuing toward perfect).
+    if (job.status !== 'live' && !(job.status === 'building' && job.files && job.files.length > 0)) return;
+    if (inBrowserCount === 0) return;
+    if (workbenchStore.silentBuildActive.get()) return;
+    if (workbenchStore.silentExitReady.get()) return;
+    reArmedRef.current = true;
+    workbenchStore.silentBuildActive.set(true);
+    workbenchStore.silentPhase.set('verifying');
+    workbenchStore.silentCycle.set(1);
+  }, [job.status, inBrowserCount]);
 
   // ── Render:
   //   EAGER-MOUNT (fixes "generation doesn't happen" + "commands don't run"

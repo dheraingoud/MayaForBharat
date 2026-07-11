@@ -42,6 +42,11 @@ describe('stripMetadata — auto-fix breadcrumb collapse (F2)', () => {
     expect(out).toBe('');
   });
 
+  it('strips "MAYA is rebuilding the app (attempt N/M)…" (deadlock watchdog breadcrumb)', () => {
+    const out = stripMetadata('MAYA is rebuilding the app (attempt 5/15)…');
+    expect(out).toBe('');
+  });
+
   it('strips a trailing sentence variant (ends with ". " not "…")', () => {
     const out = stripMetadata('MAYA is fixing a terminal error (attempt 1/15). ');
     expect(out).toBe('');

@@ -241,6 +241,7 @@ export function stripMetadata(content: string) {
   //   "MAYA is fixing a terminal error (attempt 1/15)…"
   //   "MAYA is fixing a preview error (attempt 1/15)…"
   //   "MAYA is continuing the build (attempt 1/15)…"
+  //   "MAYA is verifying the preview (attempt 1/15)…"  (silent-build vision verify)
   // Without this, the auto-fix subscriber (BuilderPage) sends these as a
   // role:'user' message → they rendered as a FAKE USER BUBBLE ("a message
   // going from the user without the user typing anything"). Stripping them
@@ -248,7 +249,7 @@ export function stripMetadata(content: string) {
   // the empty-textContent guards in the render paths below). The LLM still
   // sees the real error context via pipelineInstructionsRef (server-injected),
   // so the fix loop still triggers; only the visible bubble dies.
-  const autoFixPreambleRegex = /(?:\*Auto-fix attempt\s+\d+\/\d+[^*]*\*|MAYA is (?:fixing a (?:terminal|preview)(?: error| that didn't load)?|continuing the build) \(attempt\s+\d+\/\d+\)[^]*?(?:…|\.)\s*)/g;
+  const autoFixPreambleRegex = /(?:\*Auto-fix attempt\s+\d+\/\d+[^*]*\*|MAYA is (?:fixing a (?:terminal|preview)(?: error| that didn't load)?|continuing the build|verifying the preview|rebuilding the app) \(attempt\s+\d+\/\d+\)[^]*?(?:…|\.)\s*)/g;
   // Strip ANSI color escapes that WebContainer terminal dumps can carry.
   const ansiRegex = /\x1b\[[0-9;]*[A-Za-z]/g;
   const planContextRegex = /\n*---\s*APP PLAN.*?---\s*END PLAN\s*---.*?architecture\./gs;

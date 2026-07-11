@@ -72,7 +72,22 @@ describe('detectProjectCommands', () => {
     const files = [{ path: 'index.html', content: '<html></html>' }]
     const result = await detectProjectCommands(files)
     expect(result.type).toBe('Static')
-    expect(result.startCommand).toBe('npx --yes serve')
+    expect(result.setupCommand).toContain('cat > package.json')
+    expect(result.setupCommand).toContain('cat > server.js')
+    expect(result.setupCommand).toContain('server.js')
+    expect(result.startCommand).toBe('node server.js')
+  })
+
+  it('detects static HTML when package.json has no scripts and index.html exists', async () => {
+    const files = [
+      { path: 'package.json', content: JSON.stringify({ name: 'test' }) },
+      { path: 'index.html', content: '<html></html>' },
+    ]
+    const result = await detectProjectCommands(files)
+    expect(result.type).toBe('Static')
+    expect(result.setupCommand).toContain('cat > package.json')
+    expect(result.setupCommand).toContain('cat > server.js')
+    expect(result.startCommand).toBe('node server.js')
   })
 
   it('returns empty for unknown project type', async () => {
@@ -162,7 +177,8 @@ describe('createCommandsMessage', () => {
   it('generates a message with id and text content', () => {
     const msg = createCommandsMessage({
       type: 'Static',
-      startCommand: 'npx serve',
+      startCommand: 'node server.js',
+      setupCommand: 'echo test',
       followupMessage: '',
     }) as any
     expect(msg!.id).toBeTruthy()

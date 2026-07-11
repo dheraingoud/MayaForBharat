@@ -72,11 +72,19 @@ import ChatAlert from '@/lib/workbench/components/chat/ChatAlert'
 // (now-unused) state — kept to avoid broader surgery. Type import stays.
 import type { ProgressAnnotation } from '@/lib/workbench/types/context'
 import { DeployButton } from '@/lib/workbench/components/deploy/DeployButton'
+import { GitHubSnapshotButton } from './GitHubSnapshotButton'
 
 // ─── Our components ───────────────────────────────────────────────────────────
 import { WorkbenchPreview } from './WorkbenchPreview'
 import { useAutoVerification } from '@/lib/workbench/hooks/useAutoVerification'
 import { usePreviewVerification } from '@/lib/workbench/hooks/usePreviewVerification'
+// S5: slim silent-build status strip. READS silentPhase/silentCycle atoms;
+// renders the in-flight cycle pill (Building · cycle N/15 / Verifying / Vision-
+// judging) AND the exhausted Retry/Continue give-up surface (Q3/Q4) — REPLACES
+// the full-screen <GenerateJobCard> chat-column mount so the user never sees
+// "Building your app" while on the live site (Bug 2026-07-11). Chat + preview
+// always render below/alongside the strip; build prose stays suppressed (S1-S5).
+import { SilentBuildStrip } from './SilentBuildStrip'
 
 const logger = createScopedLogger('BuilderPage')
 
@@ -188,6 +196,39 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   const showTerminal = useStore(workbenchStore.showTerminal)
   const streaming = useStore(streamingState)
   const actionAlert = useStore(workbenchStore.alert)
+
+  // ─── Silent autonomous build (S2) ───────────────────────────────────────────
+  // Once the user sends the FIRST build prompt in BuilderPage, zero further chat
+  // bubbles / toasts / error cards / red status dot may surface until a perfect
+  // preview (runtime-clean AND vision-passed) — or give-up at 15 verify cycles.
+  // silentBuildActive gates every visible surfacing; silentCycle/silentPhase
+  // drive the single progress card. Refs mirror the atoms for stale-free reads
+  // inside async/onFinish/preview-health closures (the pipelineInstructionsRef
+  // pattern). See docs/superpowers/specs/2026-07-10-silent-autonomous-build-design.md.
+  const SILENT_MAX_CYCLES = 15 // Q3 give-up cap (verify/auto-fix rounds).
+  const silentBuildActive = useStore(workbenchStore.silentBuildActive)
+  const silentCycle = useStore(workbenchStore.silentCycle)
+  const silentPhase = useStore(workbenchStore.silentPhase)
+  const silentBuildActiveRef = useRef(false)
+  const silentCycleRef = useRef(1)
+  // visionPassedRef — set by the onVerifyCycle callback when the vision judge
+  // passes ALL routes this round; cleared on any failure. The exit-gate effect
+  // reads it (runtime-clean AND vision-passed) before clearing silentBuildActive.
+  const visionPassedRef = useRef(false)
+  // S5: capture the original first build prompt triplet so an exhausted
+  // Give-up card "Retry" (Q3: re-run the autonomous loop from cycle 1) can
+  // re-arm the atoms + re-send the build as a HIDDEN pipeline send, exactly
+  // like the auto-fix/verify breadcrumbs (visible breadcrumb strips to ''
+  // via UserMessage autoFixPreambleRegex → zero user bubbles). Without this,
+  // exhausted Retry is a no-op, and the loose jobsRowRef only carries the
+  // detached Convex row triplet, not what the in-browser stream was fed.
+  const originalBuildPromptRef = useRef<string | null>(null)
+  const originalBuildModelRef = useRef<string | null>(null)
+  const originalBuildProviderRef = useRef<string | null>(null)
+  useEffect(() => {
+    silentBuildActiveRef.current = silentBuildActive
+    silentCycleRef.current = silentCycle
+  }, [silentBuildActive, silentCycle])
 
   // ─── Maya model tier ────────────────────────────────────────────────────────
   // Default: Maya Mini (index 0, stepfun-ai/step-3.7-flash). NOT index 1
@@ -348,15 +389,18 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         logger.warn(`[AutoRetry ${tag}] Attempt ${attempt + 1}/${maxAttempts} — retrying in ${delay / 1000}s`, e)
         // Clear any stale retry toast before showing the next phase
         toast.dismiss('auto-retry')
-        toast.warn(
-          isQuota
-            ? `MAYA hit its API rate limit — retrying in ${delay / 1000}s... (${attempt + 1}/${maxAttempts})`
-            : `Connection issue. Retrying in ${delay / 1000}s... (${attempt + 1}/${maxAttempts})`,
-          {
-            autoClose: delay,
-            toastId: 'auto-retry',
-          },
-        )
+        // S2: silent during autonomous build — retries still fire, just invisibly.
+        if (!silentBuildActiveRef.current) {
+          toast.warn(
+            isQuota
+              ? `MAYA hit its API rate limit — retrying in ${delay / 1000}s... (${attempt + 1}/${maxAttempts})`
+              : `Connection issue. Retrying in ${delay / 1000}s... (${attempt + 1}/${maxAttempts})`,
+            {
+              autoClose: delay,
+              toastId: 'auto-retry',
+            },
+          )
+        }
         retryTimerRef.current = setTimeout(() => {
           if (!streamingState.get()) {
             logger.info(`[AutoRetry ${tag}] Retrying now (attempt ${attempt + 1})`)
@@ -369,15 +413,24 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         retryRef.current.count = 0
         retryRef.current.isQuota = false
         logger.error(`Chat request failed after all retries (quota=${isQuota})`, e)
-        toast.error(
-          isQuota
-            ? 'Build paused — API rate limit window exhausted. Send a message to retry.'
-            : 'Build paused due to connection issues. Send a message to resume.',
-          {
-            autoClose: false,
-            toastId: 'retry-failed',
-          },
-        )
+        // S2: during silent build, never toast an error. Flip the single
+        // progress card to its exhausted variant (Retry/Continue) instead so the
+        // user has a labeled escape — no bubble, no toast.
+        if (silentBuildActiveRef.current) {
+          workbenchStore.silentPhase.set('exhausted')
+          workbenchStore.silentBuildActive.set(false)
+          silentBuildActiveRef.current = false
+        } else {
+          toast.error(
+            isQuota
+              ? 'Build paused — API rate limit window exhausted. Send a message to retry.'
+              : 'Build paused due to connection issues. Send a message to resume.',
+            {
+              autoClose: false,
+              toastId: 'retry-failed',
+            },
+          )
+        }
       }
     },
     onFinish: ({ message, finishReason }) => {
@@ -400,13 +453,59 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         // Phase B: a non-length finish means the stream completed (probably the
         // auto-fix landed). Clear the in-chat error card so it doesn't linger.
         workbenchStore.buildErrorCard.set(undefined)
+
+        // ─── S5: no-action deadlock watchdog ──────────────────────────────────
+        // A prose-only silent stream (finishReason !== 'length', zero bolt
+        // file/shell/start actions) leaves workbenchStore.files empty → no WC
+        // boot → no preview iframe → usePreviewVerification can't arm →
+        // onVerifyCycle never fires → silentCycle never bumps → never reaches
+        // the cap → composer stays LOCKED + card stuck "Building" forever. The
+        // Q3 cap-and-exhaust ONLY triggers on a verify FAIL; a no-action
+        // response produces ZERO cycles. Mirror the onVerifyCycle(false) give-up
+        // plumbing (L1225-1246): bump silentCycle; at the cap exhaust (same path
+        // as verify-fail); else re-stream a forced-action directive via the
+        // hidden pipelineInstructionsRef + a zero-bubble breadcrumb (autoFixPre-
+        // ambleRegex now covers "MAYA is rebuilding the app (attempt N/M)…").
+        if (
+          silentBuildActiveRef.current &&
+          Object.keys(workbenchStore.files.get() ?? {}).length === 0
+        ) {
+          const nextCycle = silentCycleRef.current + 1
+          if (nextCycle > SILENT_MAX_CYCLES) {
+            workbenchStore.silentPhase.set('exhausted')
+            workbenchStore.silentBuildActive.set(false)
+            silentBuildActiveRef.current = false
+            return
+          }
+          silentCycleRef.current = nextCycle
+          workbenchStore.silentCycle.set(nextCycle)
+          workbenchStore.silentPhase.set('building')
+          // Forced-action directive → model only (server appends to the user
+          // message via pipelineInstructionsRef). Demand a complete artifact so
+          // this round emits real file/shell actions instead of prose.
+          pipelineInstructionsRef.current =
+            '\n\nYour previous response produced NO file actions — the preview never loaded. You MUST emit the complete app NOW using <boltArtifact> with a nested <boltAction type="file"> for every source file and the needed <boltAction type="shell"> commands (install + start). Do not explain or emit prose-only. Output the full artifact immediately.'
+          const attempt = nextCycle
+          setTimeout(() => {
+            trackedSendMessage({ text: `MAYA is rebuilding the app (attempt ${attempt}/${SILENT_MAX_CYCLES})…` })
+            setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
+          }, 400)
+          return
+        }
         return
       }
       if (continueAttemptRef.current >= CONTINUE_MAX) {
         logger.warn(`[Chat] Continuation cap reached (${CONTINUE_MAX}) — surfacing as fallback`)
-        toast.warning('MAYA hit the token limit; continuing in the next message.', {
-          autoClose: 4000, toastId: 'continue-cap',
-        })
+        // S2: silent build — no token-limit toast; flip the card to exhausted.
+        if (silentBuildActiveRef.current) {
+          workbenchStore.silentPhase.set('exhausted')
+          workbenchStore.silentBuildActive.set(false)
+          silentBuildActiveRef.current = false
+        } else {
+          toast.warning('MAYA hit the token limit; continuing in the next message.', {
+            autoClose: 4000, toastId: 'continue-cap',
+          })
+        }
         continueAttemptRef.current = 0
         return
       }
@@ -470,6 +569,68 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   useEffect(() => {
     streamingState.set(isLoading || fakeLoading)
   }, [isLoading, fakeLoading])
+
+  // ─── In-browser chunk-stall watchdog (2026-07-11) ──────────────────────────
+  // The detached Convex path (generateJobsHandler) has STALL_TIMEOUT_MS +
+  // REASON_CEILING_MS + HARD_TIMEOUT_MS for NIM mid-stream stalls. The
+  // in-browser useChat path had no equivalent — stepfun-3.7-flash /
+  // deepseek-v4-flash reasoning-only stalls could hang "Thinking…" forever.
+  // Use message-length deltas as a chunk-rate proxy. If the latest assistant
+  // message text length doesn't grow for STALL_TIMEOUT_MS while isLoading is
+  // true, abort via `stop()` and surface a Retry toast. Reasoning-mode trickle
+  // emits reasoning deltas but no visible text — this catches that exact
+  // pattern (visible text frozen for 60s).
+  const lastTextLenRef = useRef(0);
+  const streamStartedAtRef = useRef(0);
+  const stallToastShownRef = useRef(false);
+  useEffect(() => {
+    if (!isLoading) {
+      // Stream ended — reset all watchdog state.
+      lastTextLenRef.current = 0;
+      streamStartedAtRef.current = 0;
+      stallToastShownRef.current = false;
+      return;
+    }
+    if (streamStartedAtRef.current === 0) {
+      streamStartedAtRef.current = Date.now();
+    }
+    // Snapshot the latest assistant message text length (AI SDK v6 UIMessage
+    // has only `.parts`, not `.content` — concat text parts).
+    const extractText = (m: any): string => {
+      if (!m) return '';
+      if (Array.isArray(m.parts)) {
+        return m.parts
+          .filter((p: any) => p?.type === 'text')
+          .map((p: any) => p?.text ?? '')
+          .join('');
+      }
+      return '';
+    };
+    const lastAssistant = [...messages].reverse().find((m: any) => m.role === 'assistant');
+    const lastText = extractText(lastAssistant);
+    lastTextLenRef.current = lastText.length;
+    const STALL_TIMEOUT_MS = 60_000;
+    const tick = setTimeout(() => {
+      // Recheck the text length now — if it didn't grow AND isLoading is still
+      // true AND we haven't yet thrown the toast, abort and toast.
+      const now = Date.now();
+      const lastAssistantNow = [...messages].reverse().find((m: any) => m.role === 'assistant');
+      const lastTextNow = extractText(lastAssistantNow);
+      // No growth since last snapshot AND no growth in initial-start snapshot.
+      const noGrowth = lastTextNow.length === lastTextLenRef.current && lastTextNow.length === 0;
+      if (noGrowth && isLoading && !stallToastShownRef.current) {
+        stallToastShownRef.current = true;
+        const seconds = Math.floor((now - streamStartedAtRef.current) / 1000);
+        toast.warning('Model stream stalled — auto-aborting. Hit Retry to resume.', {
+          toastId: 'in-browser-stall',
+          autoClose: 8000,
+        });
+        logger.warn(`[InBrowserStall] No chunk growth for ${seconds}s — calling stop()`);
+        try { stop(); } catch (e) { logger.error('[InBrowserStall] stop() threw', e); }
+      }
+    }, STALL_TIMEOUT_MS);
+    return () => clearTimeout(tick);
+  }, [isLoading, messages, stop]);
 
   // ─── Navigation guard: prevent accidental close/navigation during builds ───
   useEffect(() => {
@@ -739,10 +900,14 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       const errorSnippet = error.length > 2000 ? error.slice(-2000) : error
 
       logger.info(`[AutoFix] ${sourceLabel} error — attempt ${attempt}/${maxAttempts}`)
-      toast.info(`Auto-fixing ${sourceLabel.toLowerCase()} error (${attempt}/${maxAttempts})...`, {
-        autoClose: 3000,
-        toastId: 'auto-fix-progress',
-      })
+      // S2: silent build — the hidden injection + (stripMetadata-nulled)
+      // breadcrumb already produce no visible chat. Gate only the toast.
+      if (!silentBuildActiveRef.current) {
+        toast.info(`Auto-fixing ${sourceLabel.toLowerCase()} error (${attempt}/${maxAttempts})...`, {
+          autoClose: 3000,
+          toastId: 'auto-fix-progress',
+        })
+      }
 
       // ─── HIDDEN AUTO-FIX INJECTION (no internals leak) ──────────────────────
       // User sees ONLY a clean bilingual status breadcrumb. The real error
@@ -820,14 +985,24 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   const previewHealthRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    // Only run when streaming just ended
+    // Only run when streaming just ended — UNLESS the silent autonomous loop
+    // is active (Bug 2026-07-11 install-exit-1 deadlock fix). During silent
+    // build, NIM streaming rounds churn (build → verify-fail → fix-reemit
+    // → re-stream → ...) — each round clears the timer, so the 90s deadline
+    // never survives. With silentBuildActive, keep the timer armed across
+    // streaming rounds; the timer callback already checks previews.length>0
+    // → returns harmlessly if the preview landed.
     if (isLoading || fakeLoading) {
-      // Clear any pending health check when new streaming starts
-      if (previewHealthRef.current) {
-        clearTimeout(previewHealthRef.current)
-        previewHealthRef.current = null
+      if (!silentBuildActiveRef.current) {
+        // Normal chat: clear timer, bail — diagnose only after stream ends.
+        if (previewHealthRef.current) {
+          clearTimeout(previewHealthRef.current)
+          previewHealthRef.current = null
+        }
+        return
       }
-      return
+      // Silent build: don't clear, don't bail — fall through so the timer
+      // (re)arms below if not already set.
     }
 
     // Check if there are any start actions that were executed
@@ -853,6 +1028,15 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     // Start 30s timeout — if no preview appears, auto-send diagnostic
     if (autoRunAttemptsRef.current >= MAX_AUTO_RUN_CYCLES) {
       logger.warn('[PreviewHealth] Max auto-run cycles reached, surfacing give-up')
+      // S2: during silent build, the BuildErrorCard surface is gated off in
+      // S3 (AssistantMessage) — but a give-up here must still surface. Flip the
+      // single progress card to its exhausted variant (Retry/Continue), no toast.
+      if (silentBuildActiveRef.current) {
+        workbenchStore.silentPhase.set('exhausted')
+        workbenchStore.silentBuildActive.set(false)
+        silentBuildActiveRef.current = false
+        return
+      }
       // Gap C: graceful degradation instead of a silent stall. attempt=0/
       // maxAttempts=0 → BuildErrorCard renders its "Auto-fix unable to resolve"
       // fallback (BuildErrorCard.tsx L97-107), per CLAUDE.md "never 502 the
@@ -880,6 +1064,7 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     // hang should be diagnosed fast. L863 guard still returns harmlessly if
     // the preview lands before the deadline.
     const previewHealthGraceMs = autoRunAttemptsRef.current === 0 ? 90_000 : 30_000
+    if (previewHealthRef.current) return // Already armed (silent mode kept it alive)
     previewHealthRef.current = setTimeout(() => {
       const currentPreviews = workbenchStore.previews.get()
       if (currentPreviews.length > 0) return // Preview appeared, all good
@@ -887,10 +1072,14 @@ export function BuilderPage({ appId }: BuilderPageProps) {
 
       autoRunAttemptsRef.current += 1
       logger.info(`[PreviewHealth] No preview after ${previewHealthGraceMs / 1000}s — auto-fixing (cycle ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES})`)
-      toast.info('No preview detected — checking for errors...', {
-        autoClose: 3000,
-        toastId: 'preview-health',
-      })
+      // S2: silent build — gate the visible toast; the hidden injection still
+      // fires silently below (breadcrumb is stripMetadata-nulled → no bubble).
+      if (!silentBuildActiveRef.current) {
+        toast.info('No preview detected — checking for errors...', {
+          autoClose: 3000,
+          toastId: 'preview-health',
+        })
+      }
 
       // ─── Phase B / Phase L: hidden injection (no internals leak) ─────────────
       // Previously this sent a raw `diagMsg` user message containing literal
@@ -911,20 +1100,25 @@ export function BuilderPage({ appId }: BuilderPageProps) {
         '',
         `The dev server was started but no preview appeared after ${previewHealthGraceMs / 1000} seconds (auto-diagnostic attempt ${autoRunAttemptsRef.current}/${MAX_AUTO_RUN_CYCLES}). This usually means a compilation error or the dev server crashed silently.`,
         '',
-        'Inspect the code for import errors (missing modules, wrong paths), syntax errors, missing dependencies in package.json. Fix ONLY the broken source files, re-emit only the corrected files in bolt action file tags.',
-        'Do NOT re-run npm install, npm run build, tests, or npm run dev — the dev server is already running and will hot-reload your fix automatically.',
+        'Inspect the code for import errors (missing modules, wrong paths), syntax errors, missing dependencies in package.json. Fix ONLY the broken source files — do NOT regenerate files that already pass.',
+        'Re-emit only the file(s) that need changes. Do NOT re-run npm install, npm run build, tests, or npm run dev — the dev server is already running and will hot-reload your fix automatically.',
         'Do not explain — emit only the corrected source files directly.',
       ].join('\n')
 
       // Surface the styled in-chat error card (Phase B). source='preview'
       // so the card labels it "preview" not "terminal".
-      workbenchStore.buildErrorCard.set({
-        command: '(preview-health)',
-        error: `Dev server started but no preview appeared after ${previewHealthGraceMs / 1000}s. Running auto-diagnostics…`,
-        source: 'preview',
-        attempt: autoRunAttemptsRef.current,
-        maxAttempts: MAX_AUTO_RUN_CYCLES,
-      })
+      // S2: during silent build, skip the BuildErrorCard surface — the single
+      // progress card is the only live surface (S3 also gates it). The hidden
+      // injection below keeps the silent loop moving regardless.
+      if (!silentBuildActiveRef.current) {
+        workbenchStore.buildErrorCard.set({
+          command: '(preview-health)',
+          error: `Dev server started but no preview appeared after ${previewHealthGraceMs / 1000}s. Running auto-diagnostics…`,
+          source: 'preview',
+          attempt: autoRunAttemptsRef.current,
+          maxAttempts: MAX_AUTO_RUN_CYCLES,
+        })
+      }
 
       if (streamingState.get()) {
         // Queue for when the current stream ends (same pattern as auto-fix loop).
@@ -939,7 +1133,13 @@ export function BuilderPage({ appId }: BuilderPageProps) {
     return () => {
       if (previewHealthRef.current) {
         clearTimeout(previewHealthRef.current)
-        previewHealthRef.current = null
+        // Silent mode: keep the ref so the guard at L1004 sees it on
+        // re-entry and skips re-arming. Effects re-run on every dep change.
+        // Non-silent mode: null the ref so the next !streaming run arms
+        // a fresh timer (single-shot diagnose after each stream).
+        if (!silentBuildActiveRef.current) {
+          previewHealthRef.current = null
+        }
       }
     }
   }, [isLoading, fakeLoading, model, provider.name, chatSendMessage])
@@ -1118,13 +1318,130 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   // sends each to the VERIFIER vision model, auto-fixes on failure.
   // Runs alongside useAutoVerification — handles the image path while
   // useAutoVerification handles the text-only fallback.
+  //
+  // S2: onVerifyCycle replaces the default visible chatSendMessage fix-directive
+  // so a verify round never renders as a user bubble during the silent build.
+  //   passed=true  → vision gate met this round (flip silentPhase, arm
+  //                  visionPassedRef; the exit-gate effect decides if runtime-
+  //                  clean ALSO holds before clearing silentBuildActive).
+  //   passed=false → bump silentCycle (1..SILENT_MAX_CYCLES); at the cap flip the
+  //                  card to exhausted (no user bubble), else route fixMsg through
+  //                  the hidden pipelineInstructionsRef channel via the same
+  //                  stripMetadata-nulled breadcrumb pattern auto-fix uses.
   usePreviewVerification({
     isLoading: isLoading || fakeLoading,
     model,
     providerName: provider.name,
     chatSendMessage: trackedSendMessage,
     enabled: true,
+    onVerifyCycle: (_hookCycle, passed, fixMsg) => {
+      if (!silentBuildActiveRef.current) return
+      if (passed) {
+        workbenchStore.silentPhase.set('vision-judging')
+        visionPassedRef.current = true
+        logger.info('[SilentBuild] Vision gate met — exit-gate effect will check runtime-clean')
+        return
+      }
+      // passed=false: at least one route failed visual verify.
+      visionPassedRef.current = false
+      const nextCycle = silentCycleRef.current + 1
+      if (nextCycle > SILENT_MAX_CYCLES) {
+        logger.warn(`[SilentBuild] Verify give-up at ${SILENT_MAX_CYCLES} cycles — exhausted card`)
+        workbenchStore.silentPhase.set('exhausted')
+        workbenchStore.silentBuildActive.set(false)
+        silentBuildActiveRef.current = false
+        return
+      }
+      workbenchStore.silentCycle.set(nextCycle)
+      silentCycleRef.current = nextCycle
+      workbenchStore.silentPhase.set('verifying')
+      if (!fixMsg) return // hook max-cycles probe w/ empty msg → nothing to inject
+      // Hidden injection — reuse the auto-fix pattern: fixMsg rides
+      // pipelineInstructionsRef (server-injected, never renders); the visible
+      // breadcrumb is stripMetadata-nulled (UserMessage autoFixPreambleRegex
+      // now covers "MAYA is verifying the preview (attempt N/M)…") → no bubble.
+      const breadcrumb = `MAYA is verifying the preview (attempt ${nextCycle}/${SILENT_MAX_CYCLES})…`
+      pipelineInstructionsRef.current = fixMsg
+      trackedSendMessage({ text: breadcrumb })
+      setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
+    },
   })
+
+  // ─── S2: exit gate — runtime-clean AND vision-passed → hand to live ────────
+  // Fires the instant all five hold after a verify round: silent active, the
+  // vision judge passed this round (silentPhase==='vision-judging' — set by
+  // onVerifyCycle passed=true), streaming idle, a preview present, and no error
+  // card pending. Strictest gate (Q1): both runtime-clean AND vision-passed must
+  // hold or the loop keeps cycling. On pass: set silentExitReady, clear
+  // silentBuildActive (composer unlocks via S3, normal live header/preview
+  // take over), reset phase for a future build. The give-up path (15 cycles) is
+  // handled in onVerifyCycle — it flips silentPhase to 'exhausted' instead.
+  const _buildErrorCardVal = useStore(workbenchStore.buildErrorCard)
+  const _previewsVal = useStore(workbenchStore.previews)
+  // A new build/fix stream mutates files → invalidate the prior vision pass so
+  // the exit gate can't fire on a stale verdict. Refreshed only by the NEXT
+  // verify round's onVerifyCycle(passed=true).
+  useEffect(() => {
+    if (streaming && silentBuildActive) visionPassedRef.current = false
+  }, [streaming, silentBuildActive])
+  useEffect(() => {
+    if (!silentBuildActive) return
+    if (streaming) return
+    if (silentPhase !== 'vision-judging') return
+    if (_buildErrorCardVal) return // runtime has an error card pending clear
+    if (_previewsVal.length === 0) return // no preview yet
+    if (!visionPassedRef.current) return // vision judge must have passed
+    logger.info('[SilentBuild] Exit gate met — runtime-clean AND vision-passed')
+    workbenchStore.silentExitReady.set(true)
+    workbenchStore.silentBuildActive.set(false)
+    silentBuildActiveRef.current = false
+    workbenchStore.silentPhase.set('building') // reset for a future build
+  }, [silentBuildActive, streaming, silentPhase, _buildErrorCardVal, _previewsVal])
+
+  // ─── S5: silent build — callbacks hosted by <SilentBuildStrip> ───────────────
+  // The in-browser autonomous loop runs up to 15 cycles toward a perfect preview.
+  // <SilentBuildStrip> (mounted in ChatPanel when silentBuildActive OR
+  // silentPhase==='exhausted') is the lone live surface: the in-flight cycle pill
+  // (Building · cycle N/15 · Verifying · Vision-judging), then the exhausted
+  // Retry/Continue card at the 15-cycle give-up (Q3/Q4). These 3 callbacks wire
+  // the strip:
+  //   onSilentCancel   → abort + disarm (click-stop escape hatch as a button)
+  //   onSilentRetry    → re-arm atoms from cycle 1 + re-send the original build
+  //                      triplet via the hidden pipelineInstructionsRef channel
+  //                      (visible breadcrumb strips to '' via autoFixPreambleRegex
+  //                      → zero user bubbles, Q3 contract preserved)
+  //   onSilentContinue → unlock composer, hand control to the user (no re-send)
+  const onSilentCancel = () => {
+    try { stop(); chatStore.setKey('aborted', true); workbenchStore.abortAllActions() } catch {}
+    workbenchStore.silentBuildActive.set(false)
+    silentBuildActiveRef.current = false
+    workbenchStore.silentPhase.set('building')
+    toast('Build cancelled', { type: 'info', autoClose: 2000 })
+  }
+  const onSilentRetry = () => {
+    const p = originalBuildPromptRef.current
+    const m = originalBuildModelRef.current
+    const pr = originalBuildProviderRef.current
+    if (!p || !m || !pr) {
+      toast.error(language === 'hi' ? 'मूल प्रॉम्प्ट गायब है — रिट्राय नहीं हो सकता।' : 'Missing original prompt — cannot retry.')
+      return
+    }
+    workbenchStore.silentBuildActive.set(true)
+    silentBuildActiveRef.current = true
+    workbenchStore.silentPhase.set('building')
+    workbenchStore.silentCycle.set(1)
+    silentCycleRef.current = 1
+    visionPassedRef.current = false
+    pipelineInstructionsRef.current = `\n\n[Model: ${m}]\n\n[Provider: ${pr}]\n\n${p}`
+    trackedSendMessage({ text: `MAYA is continuing the build (attempt 1/${SILENT_MAX_CYCLES})…` })
+    setTimeout(() => { pipelineInstructionsRef.current = '' }, 0)
+  }
+  const onSilentContinue = () => {
+    workbenchStore.silentBuildActive.set(false)
+    silentBuildActiveRef.current = false
+    workbenchStore.silentPhase.set('building')
+    toast(language === 'hi' ? 'कंपोज़र अनलॉक — मैन्युअल भेजने के लिए तैयार' : 'Composer unlocked — send to continue manually', { type: 'info', autoClose: 2500 })
+  }
 
   // ─── Auto-prompt from URL (with plan shown in chat) ──────────────────────
   const promptHandledRef = useRef(false)
@@ -1424,6 +1741,23 @@ export function BuilderPage({ appId }: BuilderPageProps) {
       if (!hasSavedRef.current) {
         const resolvedId = resolveAppId()
         hasSavedRef.current = true
+        // S5: stash the original build triplet so an exhausted give-up Retry
+        // (GenerateJobCard → onRetry) can re-arm the silent loop + re-send the
+        // build identically. Set BEFORE any async/template path diverges so a
+        // template fallback still has the original prompt to replay.
+        originalBuildPromptRef.current = messageContent
+        originalBuildModelRef.current = model
+        originalBuildProviderRef.current = provider.name
+        // ── Silent autonomous build (S2): arm the silent loop ──────────
+        // First build send → zero bubbles/toasts/error-cards/red-dot until a
+        // perfect preview (runtime-clean AND vision-passed) or 15-cycle give-up.
+        // Set atom (render/progress-card) + ref (closure reads) together.
+        workbenchStore.silentBuildActive.set(true)
+        workbenchStore.silentPhase.set('building')
+        workbenchStore.silentCycle.set(1)
+        silentBuildActiveRef.current = true
+        silentCycleRef.current = 1
+        visionPassedRef.current = false
         const earlyName = messageContent.slice(0, 35).trim() || 'New App'
         logger.info(`[Persist:PreSave:Manual] Saving app "${earlyName}" (${resolvedId})`)
         setApp(prev => prev ? { ...prev, id: resolvedId, name: earlyName } : null)
@@ -1450,7 +1784,10 @@ export function BuilderPage({ appId }: BuilderPageProps) {
           provider: provider.name,
         }).catch((e: any) => {
           logger.error('[createJob] detached generation failed:', e)
-          toast.warn('Detached build job failed to start — in-browser gen still running.')
+          // S2: silent during autonomous build — never surface a toast.
+          if (!silentBuildActiveRef.current) {
+            toast.warn('Detached build job failed to start — in-browser gen still running.')
+          }
         })
       }
       setFakeLoading(true)
@@ -1701,16 +2038,22 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   // ── Derived ────────────────────────────────────────────────────────────────
   // M4: anti-AI-slop tokens — kill tailwind-default amber/emerald, use MAYA
   // orange (#E8601A) / success (#2D7A4F) / error (#F87171).
-  const statusDot = streaming
+  // S2: during silent autonomous build, the header dot never shows red — the
+  // only live surface is the single progress card. Force orange "Building".
+  const statusDot = silentBuildActive
     ? 'bg-[#E8601A]'
-    : status === 'error'
-      ? 'bg-[#F87171]'
-      : 'bg-[#2D7A4F]'
-  const statusText = streaming
+    : streaming
+      ? 'bg-[#E8601A]'
+      : status === 'error'
+        ? 'bg-[#F87171]'
+        : 'bg-[#2D7A4F]'
+  const statusText = silentBuildActive
     ? 'Building'
-    : status === 'error'
-      ? 'Error'
-      : 'Ready'
+    : streaming
+      ? 'Building'
+      : status === 'error'
+        ? 'Error'
+        : 'Ready'
   const hasInput = (input || '').trim().length > 0
 
   // Mapped messages for rendering (parsed by engine)
@@ -1800,6 +2143,9 @@ export function BuilderPage({ appId }: BuilderPageProps) {
             </button>
           </div>
 
+          {/* GitHub snapshot button */}
+          <GitHubSnapshotButton />
+
           {/* Deploy button (bolt.diy) */}
           <DeployButton />
         </div>
@@ -1822,6 +2168,11 @@ export function BuilderPage({ appId }: BuilderPageProps) {
                   append={append} regenerate={regenerate} addToolResult={addToolResultLegacy}
                   model={model} provider={provider}
                   language={language}
+                  silentBuildActive={silentBuildActive}
+                  silentPhase={silentPhase}
+                  onSilentCancel={onSilentCancel}
+                  onSilentRetry={onSilentRetry}
+                  onSilentContinue={onSilentContinue}
                   mayaTiers={mayaTiers}
                   selectedTier={selectedTier} setSelectedTier={setSelectedTier}
                   showTierMenu={showTierMenu} setShowTierMenu={setShowTierMenu}
@@ -1853,6 +2204,11 @@ export function BuilderPage({ appId }: BuilderPageProps) {
                 append={append} regenerate={regenerate} addToolResult={addToolResultLegacy}
                 model={model} provider={provider}
                 language={language}
+                silentBuildActive={silentBuildActive}
+                silentPhase={silentPhase}
+                onSilentCancel={onSilentCancel}
+                onSilentRetry={onSilentRetry}
+                onSilentContinue={onSilentContinue}
                 mayaTiers={mayaTiers}
                 selectedTier={selectedTier} setSelectedTier={setSelectedTier}
                 showTierMenu={showTierMenu} setShowTierMenu={setShowTierMenu}
@@ -1904,7 +2260,7 @@ interface ChatPanelProps {
   addToolResult: ({ toolCallId, result }: { toolCallId: string; result: any }) => void
   model: string
   provider: ProviderInfo
-  language: string
+  language: 'hi' | 'en'
   // Model tier
   mayaTiers: MayaTier[]
   selectedTier: number
@@ -1921,7 +2277,22 @@ interface ChatPanelProps {
   enhancingPrompt: boolean
   promptEnhanced: boolean
   enhancePrompt: (input: string, setInput: (v: string) => void, model: string, provider: ProviderInfo, apiKeys?: Record<string, string>) => void
+  // S2: silent autonomous build — true while the silent build loop is armed.
+  // Locks the composer (disabled textarea + Building… hint) and forces the
+  // SendButton to its stop affordance — the escape hatch (click stop aborts the
+  // loop). Until a perfect preview or 15-cycle give-up, no new user send is
+  // accepted; the only live interaction is click-stop-to-abort.
+  silentBuildActive: boolean
+  // S5: silent-build phase atom read for <SilentBuildStrip> ('building' |
+  // 'verifying' | 'vision-judging' | 'exhausted'). Strip mounts when
+  // silentBuildActive OR silentPhase==='exhausted' (the give-up Retry/Continue
+  // surface stays visible after the exhaustion setters clear silentBuildActive).
+  silentPhase: 'building' | 'verifying' | 'vision-judging' | 'exhausted'
+  onSilentCancel?: () => void
+  onSilentRetry?: () => void
+  onSilentContinue?: () => void
 }
+
 
 const ChatPanel = memo((
   {
@@ -1932,6 +2303,8 @@ const ChatPanel = memo((
     tierMenuRef, activeTier, setModel, setProvider,
     dropupRef, setInput,
     enhancingPrompt, promptEnhanced, enhancePrompt,
+    silentBuildActive,
+    silentPhase, onSilentCancel, onSilentRetry, onSilentContinue,
   }: ChatPanelProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const tierBtnRef = useRef<HTMLButtonElement>(null)
@@ -1947,8 +2320,13 @@ const ChatPanel = memo((
   // error), falling back to the legacy isStreaming boolean (which already folds
   // in fakeLoading from the call sites). Drives the inline SendButton. ready →
   // send; submitted/streaming/error → stop (avoids double-send on submitted).
+  // S2: while the silent build is armed, force the stop affordance (the escape
+  // hatch) even between verify rounds when streaming is idle — the composer is
+  // locked, so click=abort, never send. Closes the "ready → accidental resend"
+  // gap during the silent pause between fix streams.
   const sendStatus: 'ready' | 'submitted' | 'streaming' | 'error' =
-    status === 'error' ? 'error'
+    silentBuildActive ? 'streaming'
+    : status === 'error' ? 'error'
     : status === 'streaming' || status === 'submitted' ? status
     : isStreaming ? 'streaming'
     : 'ready'
@@ -2069,6 +2447,30 @@ const ChatPanel = memo((
           sticky child inside <StickToBottom.Content> — sticky-inside-content
           races the spring on every layout tick and yanks the viewport). ── */}
       <div className="relative flex-1 min-h-0">
+      {/* S5: slim <SilentBuildStrip> mounts at the TOP of the chat column when
+          the silent autonomous loop is armed (silentBuildActive) OR at the
+          15-cycle give-up (silentPhase==='exhausted'). It is the ONLY live
+          surface for the loop's progress: the in-flight cycle pill (Building ·
+          cycle N/15 · Verifying · Vision-judging), then the exhausted
+          Retry/Continue. It REPLACES the full-screen <GenerateJobCard> chat-
+          column mount (Bug 2026-07-11: user must never see "Building your app"
+          on the live site). The chat Messages + the preview column ALWAYS render
+          below/alongside it — no full-screen blocking card. The strip reads
+          silentPhase/silentCycle from workbenchStore directly; its maxCycles
+          default (15) mirrors SILENT_MAX_CYCLES (outer BuilderPage L206) so the
+          label stays in sync without a cross-file constant import. The
+          silentPhase==='exhausted' arm of the gate keeps the strip (with its
+          Retry/Continue) mounted AFTER the exhaustion setters clear
+          silentBuildActive same-tick (the prior full-card exhausted variant was
+          dead UI — every exhausted setter disarmed the card → unmounted). */}
+      {(silentBuildActive || silentPhase === 'exhausted') && (
+        <SilentBuildStrip
+          language={language}
+          onCancel={onSilentCancel}
+          onRetry={onSilentRetry}
+          onContinue={onSilentContinue}
+        />
+      )}
       {messages.length === 0 ? (
         /* Empty state: inline, NON-scrollable greeting. Previously the empty
            chat rendered <Greeting> as an ABSOLUTE overlay riding the
@@ -2144,10 +2546,10 @@ const ChatPanel = memo((
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={onKey}
-                disabled={isStreaming}
-                placeholder={isStreaming ? (language === 'hi' ? 'MAYA काम कर रही है...' : 'MAYA is working...') : (language === 'hi' ? 'अपना ऐप आइडिया बताएं...' : 'Describe your idea, we will bring it to life..')}
+                disabled={isStreaming || silentBuildActive}
+                placeholder={silentBuildActive ? (language === 'hi' ? 'MAYA बिल्ड कर रही है… पूर्ण प्रीव्यू तक लॉक' : 'MAYA is building… locked until perfect preview') : isStreaming ? (language === 'hi' ? 'MAYA काम कर रही है...' : 'MAYA is working...') : (language === 'hi' ? 'अपना ऐप आइडिया बताएं...' : 'Describe your idea, we will bring it to life..')}
                 rows={2}
-                className={`w-full bg-transparent border-none outline-none text-[13px] text-[#F5F4F0] placeholder:text-[#6B6560] resize-none leading-[1.6] max-h-[160px] ${isStreaming ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`w-full bg-transparent border-none outline-none text-[13px] text-[#F5F4F0] placeholder:text-[#6B6560] resize-none leading-[1.6] max-h-[160px] ${isStreaming || silentBuildActive ? 'opacity-50 cursor-not-allowed' : ''}`}
                 style={{ minHeight: '52px' }}
               />
             </div>

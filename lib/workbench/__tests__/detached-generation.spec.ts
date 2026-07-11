@@ -190,3 +190,30 @@ describe('plan redirect + cron wiring', () => {
     expect(src).toMatch(/maya-genjobs-sweep[^"]+.*generateJobsHandler\.sweepStaleAction/s);
   });
 });
+
+// Task #28 — apps row must survive a fetch-abort (handleApprove nav-cancel).
+// Root cause: /api/apps-from-plan ran the 90s LLM plan BEFORE apps.create, AND
+// also booted a redundant server-side createJob. reorder so apps.create runs
+// FIRST (instant, survives abort), repatch specJson idempotently after, and
+// drop the server createJob (BuilderPageWithJob Effect#1 owns spawn on the
+// client once the user lands on /workbench/[appId]).
+describe('task #28 — apps row durable across fetch-abort', () => {
+  const src = read('app/api/apps-from-plan/route.ts');
+
+  it('creates the apps row via api.apps.create BEFORE the LLM plan (_streamText)', () => {
+    expect(src).toContain('// DURABILITY: apps row BEFORE LLM plan — survives fetch abort');
+    const createIdx = src.indexOf('api.apps.create');
+    const streamIdx = src.indexOf('_streamText({');
+    expect(createIdx, 'api.apps.create must be present').toBeGreaterThan(-1);
+    expect(streamIdx, '_streamText({ must be present').toBeGreaterThan(-1);
+    expect(createIdx, 'apps.create must precede _streamText').toBeLessThan(streamIdx);
+  });
+
+  it('does NOT bootstrap the generateJob server-side (Effect#1 owns spawn)', () => {
+    expect(src).not.toContain('api.generateJobs.createJob');
+  });
+
+  it('repatches specJson + name idempotently AFTER the LLM plan', () => {
+    expect(src).toContain('// DURABILITY: idempotent repatch of specJson + final name');
+  });
+});

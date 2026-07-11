@@ -31,6 +31,11 @@ export interface DeployResult {
   projectId: string
   success: boolean
   deploymentId?: string
+  // Bug 2026-07-11: flag returned when DEPLOY_TOKEN is missing and the
+  // deployer falls back to a fake URL. Callers should surface a warning
+  // (toast) or refuse to mark the app live so the user doesn't see
+  // "deployed" against a non-existent Vercel project.
+  mockMode?: boolean
 }
 
 // ── Helper: inject AGENTS.md + MAYA.md into project root ─────────────────
@@ -250,11 +255,17 @@ export async function deployToVercel({
   await injectMemoryFiles(directory, memoryDir).catch(() => null)
 
   // ── Demo fallback ───
+  // Bug 2026-07-11: previously returned `{ success: true, url: ... }` silently —
+  // callers like /api/chat-edit and /api/approve set app.status='live' on
+  // success, marking non-existent demo URLs as deployed. Now we surface the
+  // mock mode via a `mockMode: true` flag so callers can branch (toast a
+  // warning or refuse to mark live).
   if (!token) {
     return {
       url: `https://maya-app-${appId}.vercel.app`,
       projectId: `demo-${appId}-${Date.now()}`,
       success: true,
+      mockMode: true,
     }
   }
 

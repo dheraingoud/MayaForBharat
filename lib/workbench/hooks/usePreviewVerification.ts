@@ -23,7 +23,11 @@ const logger = createScopedLogger('PreviewVerify')
 
 const CAPTURE_TIMEOUT = 8000 // ms — how long to wait for MAYA_CAPTURE_RESULT
 const VERIFY_DELAY_AFTER_NAV = 3000 // ms — wait for SPA route to render before capturing
-const MAX_VERIFY_CYCLES = 5 // max full verification cycles per edit
+// Uncapped for the silent autonomous build (Q3 give-up cap = 15). The hook's
+// cycleRef resets each new stream, so in the silent path this rarely trips —
+// BuilderPage's silentCycle atom (1..15) is the authoritative give-up cap.
+// Non-silent chained callers now also get 15 rounds instead of 5.
+const MAX_VERIFY_CYCLES = 15 // max full verification cycles per edit
 
 interface UsePreviewVerificationOptions {
   /** Whether model streaming is in progress */
@@ -32,10 +36,24 @@ interface UsePreviewVerificationOptions {
   model: string
   /** Current provider name */
   providerName: string
-  /** Function to send a chat message (for auto-fix) */
+  /** Function to send a chat message (for auto-fix) — fallback when onVerifyCycle absent */
   chatSendMessage: (args: { text: string }) => void
   /** Whether to enable (defaults to true) */
   enabled?: boolean
+  /**
+   * Silent-build lifecycle hook. When provided, this REPLACES the default
+   * visible chatSendMessage fix-directive so a verify round never renders as
+   * a user bubble during the silent autonomous build. BuilderPage routes the
+   * fixMsg through its hidden pipelineInstructionsRef channel instead.
+   *   passed=true  → vision gate met (all routes passed); BuilderPage checks
+   *                  runtime-clean too before clearing silentBuildActive.
+   *   passed=false → fixMsg holds the full directive; BuilderPage increments
+   *                  silentCycle and re-streams via hidden injection.
+   * Note: `cycle` is the hook's per-stream cycleRef (resets each new stream),
+   * NOT the global silent build round count — BuilderPage owns that via its
+   * silentCycle atom.
+   */
+  onVerifyCycle?: (cycle: number, passed: boolean, fixMsg: string) => void
 }
 
 function deriveRoutes(): string[] {
@@ -172,6 +190,7 @@ export function usePreviewVerification({
   providerName,
   chatSendMessage,
   enabled = true,
+  onVerifyCycle,
 }: UsePreviewVerificationOptions) {
   const cycleRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -245,6 +264,9 @@ export function usePreviewVerification({
         // Reset to original route after successful verification
         const iframe = document.querySelector('iframe[title="Preview"], iframe[title="preview"]') as HTMLIFrameElement
         if (iframe && baseUrl) iframe.src = baseUrl
+        // Silent-build vision gate: signal passed. BuilderPage also checks
+        // runtime-clean before clearing silentBuildActive.
+        onVerifyCycle?.(cycle, true, '')
       } else {
         // Build failure report for auto-fix
         const failureReport = failures
@@ -257,11 +279,23 @@ export function usePreviewVerification({
         logger.warn(`[Verify] ❌ ${failures.length}/${routes.length} route(s) failed:\n${failureReport}`)
 
         if (cycle < MAX_VERIFY_CYCLES) {
-          const fixMsg = `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n*🔴 Visual Verification Failed (cycle ${cycle}/${MAX_VERIFY_CYCLES})*\n\n${failures.length} of ${routes.length} routes failed visual verification:\n${failureReport}\n\nFix ALL broken routes. After fixing, ALWAYS include the FULL pipeline:\n1. \`<boltAction type="shell">npm install</boltAction>\`\n2. \`<boltAction type="start">npm run dev</boltAction>\`\n\nIMPORTANT: Also ensure the file \`public/maya-capture.js\` is included and the root layout has \`<script src="/maya-capture.js"></script>\` so verification can capture screenshots.\n\nDo NOT explain. Just output the boltArtifact with fixes.`
+          const fixMsg = `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n*🔴 Visual Verification Failed (cycle ${cycle}/${MAX_VERIFY_CYCLES})*\n\n${failures.length} of ${routes.length} routes failed visual verification:\n${failureReport}\n\nOnly re-output the file(s) that need changes — do NOT regenerate files that already pass. Fix ONLY the broken source files implicated by the failures above. The dev server is already running and will hot-reload your fix automatically — do NOT emit npm install or npm run dev shell/start actions.\n\nIMPORTANT: Also ensure the file \`public/maya-capture.js\` is included and the root layout has \`<script src="/maya-capture.js"></script>\` so verification can capture screenshots.\n\nDo NOT explain. Just output the boltArtifact with the corrected files only.`
 
-          setTimeout(() => chatSendMessage({ text: fixMsg }), 2000)
+          if (onVerifyCycle) {
+            // Silent-build path: route the directive through onVerifyCycle so
+            // BuilderPage can inject it via the hidden pipelineInstructionsRef
+            // channel — nothing renders as a user bubble. chatSendMessage
+            // (visible leak) stays the fallback for non-silent callers.
+            onVerifyCycle(cycle, false, fixMsg)
+          } else {
+            setTimeout(() => chatSendMessage({ text: fixMsg }), 2000)
+          }
         } else {
           logger.warn(`[Verify] Max cycles (${MAX_VERIFY_CYCLES}) reached — stopping verification loop`)
+          // Hook-internal cap hit (rare — cycleRef resets per stream). The
+          // authoritative give-up is BuilderPage's silentCycle (15). Still
+          // signal so a non-silent caller could react if it wired one.
+          onVerifyCycle?.(cycle, false, '')
         }
       }
     } catch (e) {
@@ -273,7 +307,7 @@ export function usePreviewVerification({
       const iframe = document.querySelector('iframe[title="Preview"], iframe[title="preview"]') as HTMLIFrameElement
       if (iframe && baseUrl) iframe.src = baseUrl
     }
-  }, [enabled, isLoading, model, providerName, chatSendMessage])
+  }, [enabled, isLoading, model, providerName, chatSendMessage, onVerifyCycle])
 
   // Watch for streaming to end and preview to appear
   useEffect(() => {

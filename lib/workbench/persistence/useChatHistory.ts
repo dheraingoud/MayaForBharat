@@ -281,6 +281,15 @@ ${value.content}
           ? key.replace(container.workdir, '')
           : key;
         try {
+          // Ensure parent dir exists — snapshots may omit folder entries, so
+          // the first-pass mkdir only catches explicit folders. recursive:true
+          // is a no-op when the dir is already there.
+          const lastSlash = normalizedKey.lastIndexOf('/');
+          if (lastSlash > 0) {
+            const parent = normalizedKey.slice(0, lastSlash);
+            try { await container.fs.mkdir(parent, { recursive: true }); }
+            catch { /* ignore — writeFile surfaces a clearer error if parent is bad */ }
+          }
           await container.fs.writeFile(normalizedKey, value.content, {
             encoding: value.isBinary ? undefined : 'utf8',
           });

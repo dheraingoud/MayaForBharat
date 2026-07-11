@@ -58,6 +58,7 @@ function mapFromConvex(doc: any): BuiltApp {
     shownToOwner: doc.shownToOwner,
     messages: doc.messages || [],
     files: [],
+    specJson: doc.specJson ?? null,
   }
 }
 

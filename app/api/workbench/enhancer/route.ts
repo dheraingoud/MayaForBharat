@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     apiKeys?: Record<string, string>;
   };
 
-  const { name: providerName } = provider;
+  const { name: providerName } = provider ?? {};
 
   // validate 'model' and 'provider' fields
   if (!model || typeof model !== 'string') {

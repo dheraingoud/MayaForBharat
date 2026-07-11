@@ -209,6 +209,14 @@ export const saveProgress = internalMutation({
     jobId: v.id("generateJobs"),
     partialText: v.string(),
     progressNote: v.string(),
+    // Phase B (Bug 2026-07-11): partial files parsed from partialText mid-build
+    // (extractBoltFiles, closing-tag-gated → only fully-emitted file blocks).
+    // When present + non-empty, patch generateJobs.filesJson so a reopen-mid-build
+    // subscriber sees server progress so far. apps.fileTree stays UNTOUCHED
+    // mid-build — only markLive mirrors the canonical set to apps at completion.
+    files: v.optional(
+      v.array(v.object({ path: v.string(), content: v.string() })),
+    ),
   },
   handler: async (
     ctx,
@@ -216,13 +224,27 @@ export const saveProgress = internalMutation({
       jobId,
       partialText,
       progressNote,
-    }: { jobId: any; partialText: string; progressNote: string },
+      files,
+    }: {
+      jobId: any;
+      partialText: string;
+      progressNote: string;
+      files?: { path: string; content: string }[] | null;
+    },
   ) => {
     const row = await ctx.db.get(jobId);
     if (!row) return;
     if (row.status === "cancelled" || row.status === "live" || row.status === "error")
       return;
-    await ctx.db.patch(jobId, { partialText, progressNote, lastProgressAt: Date.now() });
+    const patch: any = {
+      partialText,
+      progressNote,
+      lastProgressAt: Date.now(),
+    };
+    if (files && files.length > 0) {
+      patch.filesJson = JSON.stringify(files);
+    }
+    await ctx.db.patch(jobId, patch);
   },
 });
 

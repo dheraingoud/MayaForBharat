@@ -200,6 +200,11 @@ export const ChatBox: React.FC<ChatBoxProps> = (props) => {
                   return;
                 }
 
+                // empty-textbox Enter (no text, no images) — don't fire an empty send
+                if (!props.input.trim() && props.uploadedFiles.length === 0) {
+                  return;
+                }
+
                 props.handleSendMessage?.(event);
               }
             }}

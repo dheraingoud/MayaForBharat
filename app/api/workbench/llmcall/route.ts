@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     streamOutput?: boolean;
   };
 
-  const { name: providerName } = provider;
+  const { name: providerName } = provider ?? {};
 
   if (!model || typeof model !== 'string') {
     return NextResponse.json({ error: 'Invalid or missing model' }, { status: 400 });

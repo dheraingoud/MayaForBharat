@@ -13,11 +13,13 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle, X, CheckCircle2, Wrench } from 'lucide-react';
+import { useStore } from '@nanostores/react';
+import { Loader2, AlertTriangle, X, CheckCircle2, Wrench, RefreshCw, ArrowRight } from 'lucide-react';
 import type {
   GenerateJobStatus,
   GenerateJobView,
 } from '@/lib/workbench/hooks/useGenerateJob';
+import { workbenchStore } from '@/lib/workbench/stores/workbench';
 
 export interface GenerateJobCardProps {
   appId: string;
@@ -77,8 +79,60 @@ export function GenerateJobCard({
       : null
   );
 
+  // S4: silent autonomous build — the card is the lone live surface. While the
+  // in-browser silent loop is armed, the vision-judge/auto-fix rounds drive
+  // silentPhase (building→verifying→vision-judging→exhausted); silentCycle is
+  // 1..SILENT_MAX_CYCLES. Show that as a sub-status strip so the user sees the
+  // loop progressing with zero chat noise. At silentPhase==='exhausted' (15
+  // failed rounds, or a fatal stream error), the card flips to the labeled
+  // give-up state with Retry/Continue — no user bubble auto-added (Q3).
+  const silentPhase = useStore(workbenchStore.silentPhase);
+  const silentCycle = useStore(workbenchStore.silentCycle);
+
   // `live` is always hidden — parent switches view.
-  if (job.status === 'live') return null;
+  if (job.status === 'live' && silentPhase !== 'exhausted') return null;
+
+  // S4: exhausted variant — the silent loop gave up after 15 rounds (or hit a
+  // fatal stream error mid-build). This is the ONE labeled status that
+  // replaces chat during give-up (Q3/Q4): no user bubble, no toast — just this
+  // card with Retry (re-arm the silent loop from cycle 1) / Continue (hand
+  // control back to the user for a manual send). Supersedes every other state.
+  if (silentPhase === 'exhausted') {
+    return (
+      <div
+        role="status"
+        aria-label="Build exhausted"
+        data-silent-phase="exhausted"
+        data-app-id={appId}
+        className="flex flex-col items-center justify-center h-full gap-4 bg-[#111110] text-[#F5F4F0] px-6 text-center"
+      >
+        <AlertTriangle className="w-9 h-9 text-[#E8601A]" aria-hidden="true" />
+        <h2 className="text-lg font-medium text-[#F5F4F0]">Exhausted after 15 cycles</h2>
+        <p className="text-xs text-[#9E9890] max-w-md">
+          {note ? `${String(note)} · ` : ''}
+          the autonomous loop could not reach a perfect preview. Retry to run it
+          again, or continue to take over manually.
+        </p>
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={() => { void onRetry(); }}
+            className="inline-flex items-center gap-1.5 text-sm bg-[#E8601A] hover:bg-[#FF6E1F] px-4 py-2 rounded-lg font-medium text-[#111110] active:scale-95 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+          <button
+            onClick={() => { void onBuild(); }}
+            className="inline-flex items-center gap-1.5 text-sm bg-[#1A1917] hover:bg-[#222120] ring-1 ring-white/[0.06] px-4 py-2 rounded-lg font-medium text-[#F5F4F0] active:scale-95 transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          >
+            Continue <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <p className="text-[10px] text-[#3A3835] mt-4 font-mono">
+          job {job._id?.slice(-8) ?? '-'} &middot; app {appId.slice(0, 8)}
+        </p>
+      </div>
+    );
+  }
 
   const inFlight = job.status === 'building' || job.status === 'pending';
 
@@ -133,6 +187,17 @@ export function GenerateJobCard({
                       <span className="w-1.5 h-1.5 rounded-full bg-[#2D7A4F]" aria-label="written" />
                     </div>
                   ))}
+                </div>
+              ) : null}
+
+              {/* S4: silent-phase sub-status — the lone live surface shows the
+                  vision/auto-fix round progressing with zero chat noise. */}
+              {silentPhase === 'verifying' || silentPhase === 'vision-judging' ? (
+                <div className="inline-flex items-center gap-2 mt-1 px-3 py-1.5 rounded-full bg-[#1A1917] ring-1 ring-white/[0.06] text-[11px] text-[#9E9890]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E8601A] animate-pulse" />
+                  {silentPhase === 'vision-judging'
+                    ? `Vision-judging · cycle ${silentCycle}/15`
+                    : `Verifying preview · cycle ${silentCycle}/15`}
                 </div>
               ) : null}
 

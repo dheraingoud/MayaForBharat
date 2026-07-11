@@ -88,10 +88,14 @@ export const githubConnectionStore = {
         rateLimit,
       };
 
-      // Set cookies for client-side access
-      Cookies.set('githubUsername', user.login);
-      Cookies.set('githubToken', token);
-      Cookies.set('git:github.com', JSON.stringify({ username: token, password: 'x-oauth-basic' }));
+      // Set cookies for client-side access. SECURITY (2026-07-11): added
+      // SameSite=lax + Secure to block CSRF / non-HTTPS exfil. HttpOnly can't
+      // be set from client JS, but server-set+read auth is the proper fix
+      // (deferred). Until then, the cookies live only on our origin.
+      const GITHUB_COOKIE_OPTS = { secure: true, sameSite: 'lax' as const, path: '/', expires: 30 };
+      Cookies.set('githubUsername', user.login, GITHUB_COOKIE_OPTS);
+      Cookies.set('githubToken', token, GITHUB_COOKIE_OPTS);
+      Cookies.set('git:github.com', JSON.stringify({ username: token, password: 'x-oauth-basic' }), GITHUB_COOKIE_OPTS);
 
       // Store connection details in localStorage
       localStorage.setItem('github_connection', JSON.stringify(connection));
