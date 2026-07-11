@@ -1302,14 +1302,20 @@ export function BuilderPage({ appId }: BuilderPageProps) {
   }, [ready, mounted, isLoading, fakeLoading, messages.length, initialMessages.length])
 
   // ─── Auto-verification: MANDATORY E2E visual sweep after every edit ─────────
-  // Fires after every model response that produces a preview.
-  // No guards — always enabled, always aggressive.
+  // F1-scope: DISABLED. The previous "no guards, always aggressive" auto-fire
+  // spammed chat with "MANDATORY Auto-Verification: E2E Visual Sweep" plus
+  // [Model:..]/[Provider:..] tags after every edit, surfacing internal
+  // scaffolding into the user-visible bubble. Verification still happens: the
+  // silent-build pipeline in BuilderPage routes vision failures through the
+  // hidden pipelineInstructionsRef channel (see usePreviewVerification's
+  // onVerifyCycle silent path), so fixes still trigger — without rendering as
+  // a user bubble. To re-enable the visible sweep, set enabled: true.
   useAutoVerification({
     isLoading: isLoading || fakeLoading,
     model,
     providerName: provider.name,
     chatSendMessage: trackedSendMessage,
-    enabled: true,
+    enabled: false,
     maxVerifications: 1,
   })
 

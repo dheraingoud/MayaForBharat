@@ -36,13 +36,21 @@ interface AutoVerifyOptions {
 /**
  * Monitors the preview iframe and sends mandatory verification requests
  * after EVERY edit/chat that produces a preview.
+ *
+ * F1-scope: `enabled` now DEFAULTS FALSE. BuilderPage and other callers used
+ * to opt in by default, which spammed chat with the "MANDATORY Auto-
+ * Verification: E2E Visual Sweep" prompt (and its [Model:]/[Provider:]
+ * metadata) after every edit. The silent-build pipeline in BuilderPage still
+ * handles vision verification (see usePreviewVerification's onVerifyCycle)
+ * without surfacing scaffolding to the user. Callers that need the visible
+ * sweep explicitly pass `enabled: true`.
  */
 export function useAutoVerification({
   isLoading,
   model,
   providerName,
   chatSendMessage,
-  enabled = true,
+  enabled = false,
   maxVerifications = 1,
 }: AutoVerifyOptions) {
   const verificationCountRef = useRef(0)

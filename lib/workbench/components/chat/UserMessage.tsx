@@ -255,6 +255,12 @@ export function stripMetadata(content: string) {
   const planContextRegex = /\n*---\s*APP PLAN.*?---\s*END PLAN\s*---.*?architecture\./gs;
   // Strip the hidden mandatory-pipeline instruction block if it ever leaks
   const pipelineRegex = /\n*---\s*MANDATORY BUILD PIPELINE.*?(?:render correctly\.)\n*/gs;
+  // F1: defense-in-depth against the auto-verification auto-sweep spam. If
+  // the visual-sweep hook is ever re-enabled (or any other code path injects
+  // these phrases as a role:'user' message), collapse the bubble to empty
+  // rather than letting the user see internal scaffolding. Covers the exact
+  // phrases the model is now FORBIDDEN to write per <output_contract>.
+  const autoSweepRegex = /(?:(?:[🔴✅]\s*)?MANDATORY\s+Auto[- ]?(?:Verification|Visual Sweep|Fix)[*\s\S]*?(?:Respond ONLY with:\s*"[^"]+"\.?\s*)?|Visual sweep \d+\/\d+[^*]*\*|E2E Visual Sweep)/g;
   return content
     .replace(MODEL_REGEX, '')
     .replace(PROVIDER_REGEX, '')
@@ -265,6 +271,7 @@ export function stripMetadata(content: string) {
     .replace(openArtifactRegex, '')
     .replace(openActionRegex, '')
     .replace(autoFixPreambleRegex, '')
+    .replace(autoSweepRegex, '')
     .replace(ansiRegex, '')
     .replace(planContextRegex, '')
     .replace(pipelineRegex, '')
