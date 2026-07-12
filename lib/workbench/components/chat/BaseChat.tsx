@@ -376,7 +376,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                 <ClientOnly>
                   {() => (
                     <Messages
-                      className="flex flex-col w-full min-w-0 flex-1 max-w-chat overflow-hidden pb-4 mx-auto z-1"
+                      className="flex flex-col w-full min-w-0 flex-1 max-w-chat pb-4 mx-auto z-1"
                       messages={messages}
                       isStreaming={isStreaming}
                       append={append}
