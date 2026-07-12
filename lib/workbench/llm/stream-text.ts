@@ -110,6 +110,24 @@ export async function streamText(props: {
     return newMessage;
   });
 
+  // F-scope (interleaved-thinking isolation): drop `reasoning` parts from
+  // EVERY assistant message before handing the history to the LLM provider.
+  // AI SDK v6 UIMessage.parts stores reasoning-deltas as `reasoning` parts —
+  // when we let those ride back into the next turn's convertToModelMessages()
+  // call, the model sees its OWN prior thinking as part of the conversation
+  // history and (a) gets anchored ("as I was saying...", "previously I noted..."),
+  // (b) sometimes burns reasoning_budget re-reading its own prior reasoning.
+  // The user contract is: each turn REASONS FRESH. Reasoning still streams live
+  // (visible in ThoughtBox) — only the persisted prior-turn reasoning is
+  // stripped before serialization. Tool invocations, files, and text content
+  // are preserved.
+  processedMessages = processedMessages.map((m: any) => {
+    if (m?.role !== 'assistant' || !Array.isArray(m.parts)) return m;
+    const filtered = m.parts.filter((p: any) => p?.type !== 'reasoning');
+    if (filtered.length === m.parts.length) return m;
+    return { ...m, parts: filtered };
+  });
+
   const provider = allProviders.find((p) => p.name === currentProvider) || defaultProvider;
 
   // Strip AI SDK provider prefixes from model name (e.g. "nvidia-nim/deepseek-ai/..." → "deepseek-ai/...")
