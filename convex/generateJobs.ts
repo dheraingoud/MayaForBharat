@@ -292,16 +292,44 @@ export const markError = internalMutation({
   args: {
     jobId: v.id("generateJobs"),
     error: v.string(),
+    // F2: structured error taxonomy + partial-file capture at fail time.
+    // Both optional — back-compat with callers that still pass just `error`.
+    errorCategory: v.optional(
+      v.union(
+        v.literal('quota'),
+        v.literal('parse'),
+        v.literal('timeout'),
+        v.literal('network'),
+        v.literal('cancelled'),
+        v.literal('unknown'),
+      ),
+    ),
+    partialFiles: v.optional(
+      v.array(v.object({ path: v.string(), content: v.string() })),
+    ),
   },
-  handler: async (ctx, { jobId, error }: { jobId: any; error: string }) => {
+  handler: async (
+    ctx,
+    { jobId, error, errorCategory, partialFiles }: {
+      jobId: any;
+      error: string;
+      errorCategory?: string;
+      partialFiles?: { path: string; content: string }[];
+    },
+  ) => {
     const row = await ctx.db.get(jobId);
     if (!row) return;
     if (row.status === "live") return; // don't overwrite a successful build with a late error
-    await ctx.db.patch(jobId, {
+    const patch: any = {
       status: "error" as const,
       error,
       finishedAt: Date.now(),
-    });
+    };
+    if (errorCategory) patch.errorCategory = errorCategory;
+    if (partialFiles && partialFiles.length > 0) {
+      patch.partialFilesJson = JSON.stringify(partialFiles);
+    }
+    await ctx.db.patch(jobId, patch);
   },
 });
 

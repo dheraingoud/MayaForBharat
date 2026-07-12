@@ -384,6 +384,43 @@ export async function generateJobsHandler(
     }
     return { ok: true, files: parsedFiles.length };
   } catch (e: any) {
+    // ── F2: classify the failure before marking so the UI card can swap
+    // copy/recovery per category. Detection is keyword-sniffed against NIM
+    // and AI SDK v6 error shapes we already observe in the field (see
+    // memory/maya-nim-stepfun-stall). Order matters: more specific patterns
+    // first (e.g. 'ResourceExhausted' before generic 'timeout').
+    const errMsg: string =
+      typeof e?.message === 'string' ? e.message : String(e?.message ?? e);
+    const errLower = errMsg.toLowerCase();
+    let errorCategory: 'quota' | 'parse' | 'timeout' | 'network' | 'cancelled' | 'unknown' = 'unknown';
+    if (/ResourceExhausted|total request limit reached|rate.?limit|429|workers? busy|503/i.test(errMsg)) {
+      errorCategory = 'quota';
+    } else if (/timeout|aborted|504|stalled.*midstream|hard timeout/i.test(errLower) || e?.name === 'AbortError') {
+      errorCategory = 'timeout';
+    } else if (/no parseable|parse failure|invalid json|parse error/i.test(errLower)) {
+      errorCategory = 'parse';
+    } else if (/econn|fetch failed|socket hang up|etimedout|network|5\d\d/i.test(errLower)) {
+      errorCategory = 'network';
+    } else if (userCancelled || e instanceof Cancelled || e?.__cancelled) {
+      errorCategory = 'cancelled';
+    }
+    // Capture any partial files we held before the failure so the user can
+    // retry from the most-recent good snapshot (PARSE will be empty by
+    // definition; QUOTA/TIMEOUT often carry 4-9 partial files).
+    const partialFilesAtFail: Array<{ path: string; content: string }> = (() => {
+      // Try parsedFiles (last in-flight parse); fall back to re-parse partialText.
+      // Only persist if we have at least one fully-closed boltAction block.
+      if (parsedFiles && parsedFiles.length > 0) return parsedFiles;
+      try {
+        // Lazy require keeps Convex action cold-start slim
+        const { extractBoltFiles } = require('../lib/workbench/llm/extract-bolt-files');
+        const back = extractBoltFiles(partialText, true);
+        return back.length > 0 ? back : [];
+      } catch {
+        return [];
+      }
+    })();
+
     // onFinish already marked a terminal state (live / no-files error) — a
     // late stall/cancel abort after that must NOT clobber it.
     if (didMark) return { ok: true, files: parsedFiles.length };
@@ -394,6 +431,8 @@ export async function generateJobsHandler(
       await ctx.runMutation(internal.generateJobs.markError, {
         jobId,
         error: `hard timeout (${HARD_TIMEOUT_MS / 1000}s wall-clock) — NIM stream did not finish`,
+        errorCategory,
+        partialFiles: partialFilesAtFail.length > 0 ? partialFilesAtFail : undefined,
       });
       return { ok: false };
     }
@@ -408,6 +447,8 @@ export async function generateJobsHandler(
       await ctx.runMutation(internal.generateJobs.markError, {
         jobId,
         error: `stalled mid-stream (no chunk for ${STALL_TIMEOUT_MS / 1000}s after ${MAX_STALL_RETRIES + 1} attempts)`,
+        errorCategory: 'timeout',
+        partialFiles: partialFilesAtFail.length > 0 ? partialFilesAtFail : undefined,
       });
       return { ok: false };
     }
@@ -416,16 +457,16 @@ export async function generateJobsHandler(
       await ctx.runMutation(internal.generateJobs.markError, {
         jobId,
         error: 'cancelled',
+        errorCategory: 'cancelled',
       });
       return { ok: false, cancelled: true };
     }
     // Genuine stream error.
     await ctx.runMutation(internal.generateJobs.markError, {
       jobId,
-      error:
-        typeof e?.message === 'string'
-          ? e.message
-          : String(e?.message ?? e),
+      error: errMsg,
+      errorCategory,
+      partialFiles: partialFilesAtFail.length > 0 ? partialFilesAtFail : undefined,
     });
     return { ok: false };
   } finally {

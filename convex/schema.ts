@@ -117,6 +117,24 @@ export default defineSchema({
     progressNote: v.optional(v.string()),
     filesJson: v.optional(v.string()),
     error: v.optional(v.string()),
+    // F2: structured error taxonomy so the user-facing card can swap copy/
+    // recovery action per failure class (quota → wait & retry, parse →
+    // re-roll prompt, timeout → reduce scope, network → retry, etc).
+    // Backwards-compatible: existing rows pre-patch simply omit it.
+    errorCategory: v.optional(
+      v.union(
+        v.literal('quota'),     // 429 / ResourceExhausted — NIM worker pool full
+        v.literal('parse'),     // no parseable files / reasoning-only run
+        v.literal('timeout'),   // 504 / hard wall-clock cap / stall exhaustion
+        v.literal('network'),   // 5xx / fetch failed / retry budget exhausted
+        v.literal('cancelled'), // user cancel via UI (kept distinct from error)
+        v.literal('unknown'),
+      ),
+    ),
+    // F2: partial files captured at time-of-fail so a retry can be primed
+    // from the most recent "good" snapshot instead of starting from zero.
+    // Mirrors saveProgress.files (already serialized mid-build). Optional.
+    partialFilesJson: v.optional(v.string()),
     createdAt: v.number(),
     // Wall-clock of the last saveProgress (partialText/progressNote) patch —
     // bumped server-side inside saveProgress every ~SAVE_EVERY_MS (3s) while
